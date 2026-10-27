@@ -6,8 +6,9 @@ del portal de desarrolladores hecho con Fumadocs. Expone recursos del mismo domi
 
 Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis/{id}`), clientes
 (`GET /clients`), token JWT (`POST /auth/token`), dashboard privado (`GET /dashboard/stats`,
-`GET /dashboard/activity`), base SQLite sembrada al arrancar, CORS, formato único de errores y
-documento OpenAPI con el esquema de seguridad `bearerAuth`.
+`GET /dashboard/activity`), suscripciones privadas del usuario (CRUD en `/subscriptions`), base
+SQLite sembrada al arrancar, CORS, formato único de errores y documento OpenAPI con el esquema de
+seguridad `bearerAuth`.
 
 ## Requisitos
 
@@ -49,6 +50,17 @@ curl.exe http://localhost:5080/dashboard/stats -H "Authorization: Bearer $token"
 Remove-Item token-body.json
 ```
 
+Con el mismo `$token`, una suscripción de punta a punta (el `id` sale de la respuesta del `POST` y
+del header `Location`):
+
+```powershell
+'{"apiId":"blog","plan":"free"}' | Set-Content -NoNewline sub-body.json
+curl.exe -i -X POST http://localhost:5080/subscriptions -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@sub-body.json"
+curl.exe http://localhost:5080/subscriptions -H "Authorization: Bearer $token"
+curl.exe -i -X DELETE http://localhost:5080/subscriptions/<id> -H "Authorization: Bearer $token"
+Remove-Item sub-body.json
+```
+
 ## Endpoints
 
 | Método y ruta | Qué hace |
@@ -60,6 +72,15 @@ Remove-Item token-body.json
 | `POST /auth/token` | Recibe `{ "username", "password" }`. Con el usuario demo (`demo` / `demo1234`, públicos a propósito) devuelve `{ accessToken, tokenType: "Bearer", expiresIn: 3600 }`; si no, 401 `invalid_credentials` |
 | `GET /dashboard/stats` | **Privado.** Las 4 métricas del dashboard del portal (valores fijos en el código) |
 | `GET /dashboard/activity?status=` | **Privado.** Actividad reciente; `status` (opcional) filtra por `success`, `error` o `pending`; otro valor da 400 `validation_error` |
+| `GET /subscriptions` | **Privado.** Suscripciones del usuario del token (`sub`), en orden de creación: `[{ id, apiId, plan, createdAt }]` |
+| `POST /subscriptions` | **Privado.** Recibe `{ "apiId", "plan" }` (`plan` es `free` o `pro`, exacto). 201 con la suscripción y el header `Location: /subscriptions/{id}`; 400 `validation_error` si falta un campo o el plan no es válido; 422 `unknown_api` si la API no está en el catálogo; 409 `already_subscribed` si el usuario ya está suscripto a esa API |
+| `GET /subscriptions/{id}` | **Privado.** Una suscripción del usuario |
+| `PATCH /subscriptions/{id}` | **Privado.** Recibe `{ "plan" }` y devuelve la suscripción con el plan cambiado; 400 si el plan no es válido |
+| `DELETE /subscriptions/{id}` | **Privado.** Cancela la suscripción: 204 sin cuerpo |
+
+En `/subscriptions/{id}`, un id inexistente, uno que no es un GUID o uno que pertenece a otro
+usuario dan el mismo 404 `not_found`, y la suscripción ajena no se lee, modifica ni borra: todas
+las consultas filtran por `user_name = sub`.
 
 Los endpoints privados exigen el header `Authorization: Bearer <accessToken>`. El token es un JWT
 HS256 firmado con `JWT_SECRET`, con emisor `devportal-api`, audiencia `devportal-portal`, `sub` = el
@@ -72,8 +93,10 @@ si falta, corre `Data/schema.sql` (crea las tablas si no existen) y, si la tabla
 corre `Data/seed.sql`. Arrancar de nuevo no duplica datos. Para volver a los datos iniciales en
 local alcanza con borrar el archivo de la base.
 
-Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subscriptions` (vacía;
-la usarán las suscripciones). Las métricas de `GET /dashboard/stats` no están en la base: son una
+Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subscriptions` (vacía
+al arrancar; la llenan los endpoints de `/subscriptions`, con una fila por usuario y API gracias a
+`UNIQUE (user_name, api_id)`). `id` es un GUID y `created_at` una fecha ISO 8601 en UTC, ambos
+guardados como texto. Las métricas de `GET /dashboard/stats` no están en la base: son una
 constante en `Endpoints/DashboardEndpoints.cs`. Los datos del seed se copiaron a mano de los mocks del portal
 (`fumadocs-api-portal/src/data/`). Los tags se guardan como texto JSON en `apis.tags_json`.
 
@@ -111,7 +134,10 @@ Todas las respuestas de error usan el mismo cuerpo, con mensajes en español:
 |---|---|---|
 | Ruta inexistente | 404 | `not_found` |
 | Recurso inexistente (por ejemplo, `GET /apis/nope`); el mensaje incluye el id | 404 | `not_found` |
-| Parámetro inválido (por ejemplo, `GET /dashboard/activity?status=otro`) o cuerpo JSON vacío o mal formado (en `Development` ASP.NET lo lanza como `BadHttpRequestException` y `ApiErrors.cs` lo convierte en 400) | 400 | `validation_error` |
+| Suscripción inexistente, de otro usuario o con un id que no es GUID | 404 | `not_found` |
+| Suscripción a una API que no está en el catálogo | 422 | `unknown_api` |
+| Suscripción repetida (mismo usuario y misma API) | 409 | `already_subscribed` |
+| Parámetro inválido (por ejemplo, `GET /dashboard/activity?status=otro`), campo obligatorio faltante o `plan` distinto de `free`/`pro` en `/subscriptions`, o cuerpo JSON vacío o mal formado (en `Development` ASP.NET lo lanza como `BadHttpRequestException` y `ApiErrors.cs` lo convierte en 400) | 400 | `validation_error` |
 | Usuario o contraseña incorrectos en `POST /auth/token` | 401 | `invalid_credentials` |
 | Endpoint privado sin token, con otro esquema (`Basic …`), con firma inválida, de otra audiencia o vencido; además lleva el header `WWW-Authenticate: Bearer` | 401 | `unauthorized` |
 | Método no permitido en una ruta existente | 405 | `method_not_allowed` |
@@ -130,7 +156,7 @@ devportal-api/
 │   └── DevportalApi/                 # El proyecto web (la API)
 │       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos y UserSecretsId
 │       ├── Program.cs                # Punto de entrada: registra servicios (CORS, OpenAPI, JWT), inicializa la base, arma el pipeline y mapea endpoints
-│       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto
+│       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto, SubscriptionDto y los cuerpos de /subscriptions
 │       ├── appsettings.json          # Configuración por defecto (se puede pisar con variables de entorno)
 │       ├── Properties/
 │       │   └── launchSettings.json   # Perfil de `dotnet run` en local: puerto 5080 y entorno Development
@@ -143,7 +169,8 @@ devportal-api/
 │       │   ├── ApisEndpoints.cs      # GET /apis (búsqueda y filtro) y GET /apis/{id}
 │       │   ├── ClientsEndpoints.cs   # GET /clients
 │       │   ├── AuthEndpoints.cs      # POST /auth/token (usuario demo → JWT)
-│       │   └── DashboardEndpoints.cs # GET /dashboard/stats y /dashboard/activity (grupo con RequireAuthorization)
+│       │   ├── DashboardEndpoints.cs # GET /dashboard/stats y /dashboard/activity (grupo con RequireAuthorization)
+│       │   └── SubscriptionsEndpoints.cs # CRUD privado de /subscriptions, filtrado siempre por el usuario del token
 │       └── Infrastructure/
 │           ├── ApiErrors.cs          # Formato único de errores y su manejo global
 │           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h)
@@ -152,7 +179,7 @@ devportal-api/
     └── DevportalApi.Tests/           # Proyecto de tests (xUnit)
         ├── DevportalApi.Tests.csproj
         ├── ApiFactory.cs             # Levanta la API en memoria con configuración de test y una base temporal propia
-        ├── TestTokens.cs             # Crea y valida JWT de prueba con el secreto de test (vencidos, de otra audiencia, mal firmados)
+        ├── TestTokens.cs             # Crea y valida JWT de prueba con el secreto de test (vencidos, de otra audiencia, mal firmados o de otro usuario)
         ├── HealthTests.cs            # GET /health y documento OpenAPI
         ├── ErrorTests.cs             # 404, 405 y 500 con el formato de error
         ├── CorsTests.cs              # Preflight (también a un endpoint privado) y header CORS en respuestas 404 y 401
@@ -160,7 +187,8 @@ devportal-api/
         ├── ApisTests.cs              # Catálogo: listado, búsqueda, filtro por categoría y 404
         ├── ClientsTests.cs           # Clientes en el orden del portal
         ├── AuthTests.cs              # Token con credenciales demo, credenciales malas, cuerpo mal formado y JWT_SECRET faltante o corto
-        └── DashboardTests.cs         # 401 en cada caso de token inválido, stats, filtro de actividad, 400 y security en OpenAPI
+        ├── DashboardTests.cs         # 401 en cada caso de token inválido, stats, filtro de actividad, 400 y security en OpenAPI
+        └── SubscriptionsTests.cs     # CRUD de suscripciones, 400/409/422, 404 con id ajeno o inválido y 401 sin token
 ```
 
 Recursos embebidos: `schema.sql` y `seed.sql` se compilan dentro de la DLL (`<EmbeddedResource>` en
@@ -190,15 +218,17 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
    los `TokenValidationParameters` de `Program.cs`, y deja el usuario en `HttpContext.User`. No
    rechaza nada: un request sin token sigue como anónimo.
 5. **Autorización** (`app.UseAuthorization()`): responde "¿puede pasar?". Si el endpoint pide
-   autorización (`RequireAuthorization()` en el grupo `/dashboard`) y el usuario es anónimo, corta
+   autorización (`RequireAuthorization()` en los grupos `/dashboard` y `/subscriptions`) y el usuario es anónimo, corta
    con un *challenge*: el evento `OnChallenge` de `Program.cs` escribe el 401 `unauthorized` con el
    formato único y el header `WWW-Authenticate: Bearer`.
    Estos dos middlewares van explícitos y después de `UseCors()`: si no se llaman, ASP.NET los
    agrega solo, pero **antes** de CORS, y los 401 salen sin `Access-Control-Allow-Origin` (el
    navegador no dejaría al portal leer el error). Lo cubre un test de `CorsTests.cs`.
 6. **Endpoint**: ASP.NET llama a la función del endpoint y le pasa sus parámetros: los de la ruta
-   (`{id}`), los de la query string (`q`, `category`), el cuerpo JSON (`TokenRequest`) y los
-   servicios registrados (`Database`, `Tokens`).
+   (`{id}`), los de la query string (`q`, `category`), el cuerpo JSON (`TokenRequest`), los
+   servicios registrados (`Database`, `Tokens`) y el usuario autenticado (`ClaimsPrincipal`).
+   Si la ruta tiene una restricción como `{id:guid}` y el valor no la cumple, la ruta no coincide
+   y el request termina en el 404 global del paso 2.
    Por ejemplo, la de `GET /apis` en `Endpoints/ApisEndpoints.cs`:
    1. **Dapper → SQLite**: abre una conexión, ejecuta el `SELECT` escrito a mano y Dapper convierte
       cada fila en un objeto C#.
@@ -240,6 +270,12 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | `ClaimsPrincipal` / claims | El payload decodificado del JWT (`{ sub, aud, exp, … }`) | `HttpContext.User`; `sub` se crea en `Tokens.cs` |
 | Validación explícita de un parámetro | Un `if (!['success', 'error', 'pending'].includes(status))` que responde 400 | `ListActivityAsync` en `DashboardEndpoints.cs` |
 | Transformers de OpenAPI (documento y operación) | Un plugin que post-procesa el objeto de la spec antes de servirla | `Infrastructure/OpenApiSecurity.cs` |
+| Restricción de ruta `{id:guid}` + parámetro `Guid id` | `app.get('/subscriptions/:id', …)` más validar a mano que `req.params.id` sea un UUID | `SubscriptionsEndpoints.cs` |
+| Parámetro `ClaimsPrincipal user` en un handler | Leer `req.user` (el payload del JWT) dentro del handler | `UserName` en `SubscriptionsEndpoints.cs` |
+| `Guid.NewGuid()` / tipo `Guid` | `crypto.randomUUID()` (en JSON viaja como string) | `CreateSubscriptionAsync` |
+| `DateTimeOffset.UtcNow` y `ToString("O")` | `new Date().toISOString()` (fecha con zona, en ISO 8601) | `CreateSubscriptionAsync`, `ToDto` |
+| Pattern matching `plan is not ("free" or "pro")` | Chequear un union de literales: `if (plan !== 'free' && plan !== 'pro')` para `'free' \| 'pro'` | `CreateSubscriptionAsync`, `UpdateSubscriptionAsync` |
+| `TypedResults.Created(url, body)` / `TypedResults.NoContent()` | `res.status(201).location(url).json(body)` / `res.status(204).end()` | `SubscriptionsEndpoints.cs` |
 | xUnit + `WebApplicationFactory` | Vitest + supertest | `tests/DevportalApi.Tests` |
 
 Notas:
@@ -312,3 +348,19 @@ Notas:
   (registra `components.securitySchemes.bearerAuth`) y `AddOperationTransformer` corre por cada
   endpoint: si su metadata tiene `IAuthorizeData` (lo agrega `RequireAuthorization()`), le suma
   `security: [{ bearerAuth: [] }]` y la respuesta 401.
+- **Cada usuario ve solo lo suyo**: `SubscriptionsEndpoints.cs` toma el usuario del claim `sub`
+  (`UserName(user)`) y todas las consultas llevan `WHERE … user_name = @userName`. Una suscripción
+  de otro usuario no se distingue de una inexistente: el `UPDATE`/`DELETE` afecta 0 filas y la
+  respuesta es 404, sin revelar que el id existe.
+- **409 sin carrera**: en vez de hacer un `SELECT` previo (otro request podría insertar en el medio)
+  o atrapar la `SqliteException` del `UNIQUE`, el `INSERT` usa `ON CONFLICT (user_name, api_id) DO
+  NOTHING`: si ya existe, SQLite no inserta nada y `ExecuteAsync` devuelve 0 filas afectadas → 409.
+  `PATCH` usa `UPDATE … RETURNING …`, que actualiza y devuelve la fila en una sola consulta.
+- **Cuerpos con campos opcionales a propósito**: `CreateSubscriptionRequest(string? ApiId, string? Plan)`
+  usa `string?` para que un campo faltante llegue como `null` al endpoint y responda el 400
+  `validation_error` con un mensaje claro. El `plan` se valida con un `if` (no con un `enum`) por
+  el mismo motivo que `status` en el dashboard.
+- **GUID y fecha como texto**: SQLite no tiene tipos `uuid` ni `timestamp`; `id` se guarda con
+  `Guid.ToString()` (minúsculas con guiones) y `created_at` con `ToString("O")` (ISO 8601 con
+  `+00:00`). `ToDto` los vuelve a convertir a `Guid` y `DateTimeOffset`, así el JSON y la spec los
+  declaran como `uuid` y `date-time`.

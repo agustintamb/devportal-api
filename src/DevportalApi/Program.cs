@@ -73,5 +73,6 @@ app.MapApisEndpoints();
 app.MapClientsEndpoints();
 app.MapAuthEndpoints();
 app.MapDashboardEndpoints();
+app.MapSubscriptionsEndpoints();
 
 app.Run();

@@ -14,14 +14,15 @@ public static class TestTokens
     public static string Create(
         string secret = ApiFactory.JwtSecret,
         string audience = Audience,
-        DateTime? expires = null)
+        DateTime? expires = null,
+        string subject = "demo")
     {
         var expiresAt = expires ?? DateTime.UtcNow.AddHours(1);
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = Issuer,
             Audience = audience,
-            Subject = new ClaimsIdentity([new Claim("sub", "demo")]),
+            Subject = new ClaimsIdentity([new Claim("sub", subject)]),
             IssuedAt = expiresAt.AddHours(-1),
             NotBefore = expiresAt.AddHours(-1),
             Expires = expiresAt,
