@@ -177,7 +177,7 @@ privados). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
 - **Mantenerla al día**: después de cambiar un endpoint o un DTO, `dotnet build` regenera el archivo
   y el cambio se commitea junto con el código. El test `CommittedSpecFile_MatchesServedDocument`
   compara el archivo con el documento servido. Como `dotnet test` también compila (y regenera),
-  para detectar en CI un archivo sin commitear conviene correr
+  para detectar un archivo sin commitear el job `build` del CI corre
   `git diff --exit-code openapi/portal-api.json` después del build.
 - **`servers`**: "Producción" usa `PROD_URL` (ver "Configuración") y "Local" es
   `http://localhost:5080`. Si se define `PROD_URL` durante el build, la URL también cambia en el
@@ -188,7 +188,7 @@ privados). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
 ## Deploy
 
 La API se publica en [Render](https://render.com) (plan Free) como una imagen Docker. GitHub
-Actions compila, prueba y arma la imagen en cada push y en cada pull request; si todo pasa en un
+Actions compila, prueba y arma la imagen en cada push a `main` y en cada pull request; si todo pasa en un
 push a `main`, le avisa a Render que despliegue.
 
 ### Imagen Docker (`Dockerfile`)
