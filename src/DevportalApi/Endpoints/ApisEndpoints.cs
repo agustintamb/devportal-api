@@ -37,6 +37,7 @@ public static class ApisEndpoints
     private static async Task<IResult> ListApisAsync(Database database, string? q, string? category)
     {
         await using var connection = await database.OpenConnectionAsync();
+        // ORDER BY rowid = seed insertion order = portal order.
         var rows = await connection.QueryAsync<ApiRow>(
             $"{SelectApis} WHERE @category IS NULL OR category = @category COLLATE NOCASE ORDER BY rowid",
             new { category = string.IsNullOrWhiteSpace(category) ? null : category.Trim() });

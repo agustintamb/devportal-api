@@ -481,8 +481,5 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Local SQLite database (default DB_PATH is data/portal.db). File patterns instead of `data/`
-# because Git on Windows ignores case and `data/` would also ignore the source folder `Data/`.
-*.db
-*.db-shm
-*.db-wal
+# Local SQLite database (default DB_PATH is db/portal.db)
+db/

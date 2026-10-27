@@ -56,12 +56,10 @@ variable de entorno pisa al archivo.
 | Clave | Uso | Valor por defecto (local) |
 |---|---|---|
 | `ALLOWED_ORIGINS` | Orígenes permitidos por CORS, separados por comas | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
-| `DB_PATH` | Archivo de la base SQLite; si es relativo, se resuelve contra la carpeta del proyecto (content root) | `data/portal.db` |
+| `DB_PATH` | Archivo de la base SQLite; si es relativo, se resuelve contra la carpeta del proyecto (content root) | `db/portal.db` |
 
-Con `dotnet run`, la base por defecto queda en `src/DevportalApi/data/portal.db`. En Windows el
-sistema de archivos no distingue mayúsculas, así que ese `data/` es la misma carpeta que `Data/`
-(la del código) y el archivo aparece junto a `schema.sql`. Está ignorado por git (`*.db` en
-`.gitignore`).
+Con `dotnet run`, la base por defecto queda en `src/DevportalApi/db/portal.db`, carpeta ignorada
+por git (`db/` en `.gitignore`).
 
 En Render, `ALLOWED_ORIGINS` debe definirse como variable de entorno: los valores por defecto de
 `appsettings.json` incluyen orígenes `localhost`.
@@ -226,7 +224,8 @@ Notas:
 - **Búsqueda sin acentos**: `CompareOptions.IgnoreNonSpace` ignora las marcas diacríticas
   (tildes, diéresis) al comparar y `IgnoreCase` ignora mayúsculas. Depende de los datos de
   globalización (ICU) del sistema: si algún día se despliega con
-  `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` (por ejemplo, imágenes Docker Alpine sin ICU), la
-  comparación deja de ignorar acentos.
+  `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` o `<InvariantGlobalization>true</InvariantGlobalization>`
+  en el proyecto, o con imágenes sin ICU (Alpine, Ubuntu chiseled), la comparación deja de ignorar
+  acentos. El Dockerfile debe usar una imagen `aspnet` completa (no chiseled ni Alpine).
 - **Filtros opcionales**: `string? q` vale `null` si el parámetro no viene. Los endpoints tratan
   igual `null`, vacío y espacios (`string.IsNullOrWhiteSpace`), así `?q=` devuelve todo.

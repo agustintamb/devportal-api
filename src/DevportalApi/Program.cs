@@ -15,7 +15,8 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
 builder.Services.AddOpenApi();
 
 // A relative DB_PATH is resolved against the content root (the project folder with `dotnet run`).
-var dbPath = builder.Configuration["DB_PATH"] ?? "data/portal.db";
+var configuredDbPath = builder.Configuration["DB_PATH"];
+var dbPath = string.IsNullOrWhiteSpace(configuredDbPath) ? "db/portal.db" : configuredDbPath;
 var database = new Database(Path.Combine(builder.Environment.ContentRootPath, dbPath));
 // Singleton: one shared instance; endpoints receive it as a handler parameter.
 builder.Services.AddSingleton(database);
