@@ -58,8 +58,8 @@ public static class DashboardEndpoints
     private static async Task<IResult> ListActivityPageAsync(
         Database database,
         [Description(StatusDescription)] string? status,
-        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
-        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize)
+        int page = Paging.DefaultPage,
+        int pageSize = Paging.DefaultPageSize)
     {
         if (!IsValidStatus(status))
         {

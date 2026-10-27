@@ -55,8 +55,8 @@ public static class ApisEndpoints
         Database database,
         [Description(SearchDescription)] string? q,
         [Description(CategoryDescription)] string? category,
-        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
-        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize) =>
+        int page = Paging.DefaultPage,
+        int pageSize = Paging.DefaultPageSize) =>
         Paging.Validate(page, pageSize)
         ?? TypedResults.Ok(Paging.Paginate(await QueryApisAsync(database, q, category), page, pageSize));
 

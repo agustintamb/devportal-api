@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using Dapper;
 using DevportalApi.Data;
 using DevportalApi.Infrastructure;
@@ -27,8 +26,8 @@ public static class ClientsEndpoints
 
     private static async Task<IResult> ListClientsPageAsync(
         Database database,
-        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
-        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize) =>
+        int page = Paging.DefaultPage,
+        int pageSize = Paging.DefaultPageSize) =>
         Paging.Validate(page, pageSize)
         ?? TypedResults.Ok(Paging.Paginate(await QueryClientsAsync(database), page, pageSize));
 

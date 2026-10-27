@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DevportalApi.Infrastructure;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace DevportalApi.Tests;
@@ -246,7 +247,7 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
             .Select(server => (server.GetProperty("url").GetString(), server.GetProperty("description").GetString()));
 
         Assert.Equal(
-            [("https://devportal-api.onrender.com", "Producción"), ("http://localhost:5080", "Local")],
+            [(OpenApiDocumentation.DefaultProductionUrl, "Producción"), ("http://localhost:5080", "Local")],
             servers);
     }
 
@@ -272,7 +273,9 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.All(tags, tag => Assert.False(string.IsNullOrWhiteSpace(tag.GetProperty("description").GetString())));
     }
 
-    // Fails when the code changes the spec but the committed file was not regenerated with `dotnet build`.
+    // Catches drift between the code and the committed spec files; it does not check that the spec matches
+    // what the endpoints really do (other tests cover that). Fails when the code changes the spec but the
+    // committed file was not regenerated with `dotnet build`.
     [Theory]
     [InlineData("v1", "portal-api.json")]
     [InlineData("v2", "portal-api_v2.json")]

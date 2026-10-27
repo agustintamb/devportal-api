@@ -124,10 +124,21 @@ public static class OpenApiDocumentation
 
         options.AddOperationTransformer((operation, _, _) =>
         {
+            foreach (var parameter in operation.Parameters?.OfType<OpenApiParameter>() ?? [])
+            {
+                parameter.Description = parameter.Name switch
+                {
+                    "page" => Paging.PageDescription,
+                    "pageSize" => Paging.PageSizeDescription,
+                    _ => parameter.Description,
+                };
+            }
+
             foreach (var (status, response) in operation.Responses ?? [])
             {
-                var statusCode = int.Parse(status);
-                if (response is OpenApiResponse editable
+                // The key can also be "default", which is not a number.
+                if (int.TryParse(status, out var statusCode)
+                    && response is OpenApiResponse editable
                     && editable.Description == ReasonPhrases.GetReasonPhrase(statusCode)
                     && _successDescriptions.TryGetValue(statusCode, out var description))
                 {

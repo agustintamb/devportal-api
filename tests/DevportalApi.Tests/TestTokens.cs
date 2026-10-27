@@ -15,12 +15,22 @@ public static class TestTokens
         string secret = ApiFactory.JwtSecret,
         string audience = Audience,
         DateTime? expires = null,
-        string subject = "demo",
+        string? subject = "demo",
         string? scope = null)
     {
         var expiresAt = expires ?? DateTime.UtcNow.AddHours(1);
-        // OAuth client tokens carry a space-separated "scope" claim; user tokens have none.
-        Claim[] claims = scope is null ? [new Claim("sub", subject)] : [new Claim("sub", subject), new Claim("scope", scope)];
+        // A null subject mints a token without "sub". OAuth client tokens carry a space-separated "scope"; user tokens have none.
+        var claims = new List<Claim>();
+        if (subject is not null)
+        {
+            claims.Add(new Claim("sub", subject));
+        }
+
+        if (scope is not null)
+        {
+            claims.Add(new Claim("scope", scope));
+        }
+
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = Issuer,

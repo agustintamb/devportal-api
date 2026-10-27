@@ -7,8 +7,10 @@ public static class Paging
     public const int DefaultPageSize = 20;
     public const int MaxPageSize = 100;
 
-    public const string PageDescription = "Número de página, desde 1. Por defecto, 1.";
-    public const string PageSizeDescription = "Cantidad de ítems por página, entre 1 y 100. Por defecto, 20.";
+    // Not `const`: they are built from the constants above. OpenApiDocumentation puts them on the page/pageSize parameters.
+    public static readonly string PageDescription = $"Número de página, desde {DefaultPage}. Por defecto, {DefaultPage}.";
+    public static readonly string PageSizeDescription =
+        $"Cantidad de ítems por página, entre 1 y {MaxPageSize}. Por defecto, {DefaultPageSize}.";
     public const string ErrorDescription = "`page` o `pageSize` están fuera de rango o no son números (`validation_error`).";
 
     // Null when the values are valid; otherwise the 400 to return. A non-numeric value never gets here:

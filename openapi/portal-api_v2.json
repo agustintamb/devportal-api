@@ -633,7 +633,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "description": "Id de la suscripción (GUID), el que devuelve el POST de suscripciones.",
             "required": true,
             "schema": {
               "type": "string",
@@ -699,7 +699,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "description": "Id de la suscripción (GUID), el que devuelve el POST de suscripciones.",
             "required": true,
             "schema": {
               "type": "string",
@@ -785,7 +785,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "description": "Id de la suscripción (GUID), el que devuelve el POST de suscripciones.",
             "required": true,
             "schema": {
               "type": "string",

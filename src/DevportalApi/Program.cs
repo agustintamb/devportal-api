@@ -60,6 +60,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     };
     options.Events = new JwtBearerEvents
     {
+        // A signed token without "sub" cannot identify a user: reject it as a 401 instead of failing later with a 500.
+        OnTokenValidated = context =>
+        {
+            if (context.Principal?.FindFirst("sub") is null)
+            {
+                context.Fail("The token has no 'sub' claim.");
+            }
+
+            return Task.CompletedTask;
+        },
+
         // Runs for every 401 (no header, other scheme, invalid or expired token).
         OnChallenge = context =>
         {
@@ -75,6 +86,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 })
 .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, null);
 builder.Services.AddAuthorization(AuthPolicies.Configure);
+builder.Services.AddExceptionHandler<BadRequestExceptionHandler>();
 
 // A relative DB_PATH is resolved against the content root (the project folder with `dotnet run`).
 var configuredDbPath = builder.Configuration["DB_PATH"];

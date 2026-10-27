@@ -185,6 +185,17 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
         await AssertErrorAsync(response, HttpStatusCode.Unauthorized, "unauthorized");
     }
 
+    [Fact]
+    public async Task TokenWithoutSubClaim_ReturnsUnauthorized()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/subscriptions");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestTokens.Create(subject: null));
+
+        var response = await _client.SendAsync(request);
+
+        await AssertErrorAsync(response, HttpStatusCode.Unauthorized, "unauthorized");
+    }
+
     private static string NewUser() => $"user-{Guid.NewGuid():N}";
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, string? user, string? json = null)

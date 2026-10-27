@@ -14,7 +14,7 @@ public static class SubscriptionsEndpoints
         FROM subscriptions
         """;
 
-    private const string SubscriptionIdDescription = "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.";
+    private const string SubscriptionIdDescription = "Id de la suscripción (GUID), el que devuelve el POST de suscripciones.";
 
     private const string SubscriptionNotFoundDescription =
         "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).";
@@ -78,8 +78,8 @@ public static class SubscriptionsEndpoints
     private static async Task<IResult> ListSubscriptionsPageAsync(
         Database database,
         ClaimsPrincipal user,
-        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
-        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize) =>
+        int page = Paging.DefaultPage,
+        int pageSize = Paging.DefaultPageSize) =>
         Paging.Validate(page, pageSize)
         ?? TypedResults.Ok(Paging.Paginate(await QuerySubscriptionsAsync(database, user), page, pageSize));
 

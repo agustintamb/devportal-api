@@ -1,3 +1,4 @@
+using DevportalApi.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -17,6 +18,8 @@ public class ApiFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("DB_PATH", DbPath);
         builder.UseSetting("JWT_SECRET", JwtSecret);
+        // Fixed so tests don't depend on a PROD_URL set in the developer's or CI's environment.
+        builder.UseSetting("PROD_URL", OpenApiDocumentation.DefaultProductionUrl);
         builder.UseSetting("ALLOWED_ORIGINS", $"http://localhost:3000,http://localhost:3100,{AllowedOrigin}");
     }
 

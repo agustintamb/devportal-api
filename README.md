@@ -192,14 +192,15 @@ app.use("/v2", portalApi("v2"));
 SQLite en un archivo. Al arrancar, antes de atender requests, la API crea la carpeta de `DB_PATH`
 si falta, corre `Data/schema.sql` (crea las tablas si no existen) y, si la tabla `apis` está vacía,
 corre `Data/seed.sql`. Arrancar de nuevo no duplica datos. En local el archivo sobrevive a los
-reinicios; para volver a los datos iniciales alcanza con borrarlo. En Render el disco no es
-persistente, así que la base se vuelve a sembrar en cada reinicio o deploy (y se pierden las
-suscripciones creadas); la descripción de la spec lo avisa.
+reinicios: la siembra solo ocurre si la base no existe o está vacía, y para volver a los datos
+iniciales alcanza con borrarla. Solo en Render el disco no es persistente, así que ahí la base se
+vuelve a sembrar en cada reinicio o deploy (y se pierden las suscripciones creadas); la
+descripción de la spec lo avisa.
 
 Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subscriptions` (vacía
 al arrancar; la llenan los endpoints de `/subscriptions`, con una fila por usuario y API gracias a
-`UNIQUE (user_name, api_id)`). `id` es un GUID y `created_at` una fecha ISO 8601 en UTC, ambos
-guardados como texto. Las métricas de `GET /dashboard/stats` no están en la base: son una
+`UNIQUE (user_name, api_id)`). `id` es un GUID y `created_at` una fecha ISO 8601 en UTC con
+offset `+00:00` (no `Z`, como en `2026-10-27T07:29:26.7521234+00:00`), ambos guardados como texto. Las métricas de `GET /dashboard/stats` no están en la base: son una
 constante en `Endpoints/DashboardEndpoints.cs`. El catálogo de `seed.sql` es el mismo del portal
 (`fumadocs-api-portal/src/data/apis.ts`), en el mismo orden y con los mismos valores; la actividad
 y las métricas del dashboard nombran esas APIs. Los tags se guardan como texto JSON en
@@ -538,7 +539,7 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | `dotnet` CLI (`run`, `test`, `build`, `format`) | Scripts de npm (`npm run dev`, `npm test`, …) | Sección "Comandos" |
 | `Program.cs` con top-level statements | El `index.ts` de un server Express | `src/DevportalApi/Program.cs` |
 | `namespace` + `using` | Los módulos y los `import`, pero sin relación con archivos: `using` importa un namespace (no un archivo) y la visibilidad se define con `public`/`internal`, no con `export` | `using DevportalApi.Endpoints;` en `Program.cs` |
-| Primary constructor `class CorsTests(ApiFactory factory)` | Constructor con parameter properties (`constructor(private factory: ApiFactory)`) | `CorsTests.cs`, `HealthTests.cs`, `ErrorTests.cs` |
+| Primary constructor `class CorsTests(ApiFactory factory)` | Constructor que recibe `factory` y lo captura en un closure (no crea una propiedad: `constructor(factory: ApiFactory)`, sin `private`) | `CorsTests.cs`, `HealthTests.cs`, `ErrorTests.cs` |
 | Collection expression `[]` | Un array literal `[]` | `?? []` en `Program.cs` |
 | `record` | Un `type` inmutable para datos | `HealthResponse`, `ErrorResponse`, `ApiDto` y `ClientDto` en `Contracts.cs` |
 | Record genérico `PagedResponse<T>` | `type PagedResponse<T> = { items: readonly T[]; page: number; pageSize: number; total: number }` | `Contracts.cs`, `Infrastructure/Paging.cs` |
@@ -591,8 +592,9 @@ Notas:
   globales para los namespaces más comunes (`System`, `System.Linq`, `Microsoft.AspNetCore.Builder`,
   etc.). Solo hacen falta `using` explícitos para el resto, como los de `Program.cs`.
 - **Primary constructors**: en `public class CorsTests(ApiFactory factory)` el parámetro `factory`
-  está disponible en todo el cuerpo de la clase (por ejemplo, para inicializar `_client`); no hace
-  falta declarar un campo ni asignarlo en un constructor aparte.
+  está disponible en todo el cuerpo de la clase (por ejemplo, para inicializar `_client`) como un
+  parámetro capturado, no como una propiedad (no se puede escribir `this.factory` ni leerlo desde
+  fuera); no hace falta declarar un campo ni asignarlo en un constructor aparte.
 - **Collection expressions**: `?? []` en `Program.cs` es un array vacío; el compilador infiere el
   tipo (`string[]`) por el contexto.
 - **Records**: `public sealed record HealthResponse(string Status);` define en una línea un tipo con
