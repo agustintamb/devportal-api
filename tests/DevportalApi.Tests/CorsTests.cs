@@ -34,6 +34,7 @@ public class CorsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     {
         var response = await _client.SendAsync(Preflight("https://evil.example"));
 
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
     }
 

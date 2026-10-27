@@ -8,8 +8,8 @@ Estado actual: salud (`GET /health`), CORS, formato único de errores y document
 
 ## Requisitos
 
-- [.NET SDK 10](https://dotnet.microsoft.com/download) (la versión exacta está fijada en `global.json`).
-  Se verifica con `dotnet --list-sdks`.
+- [.NET SDK 10](https://dotnet.microsoft.com/download) (`global.json` exige como mínimo la 10.0.403 y acepta
+  versiones posteriores, por `rollForward: latestFeature`). Se verifica con `dotnet --list-sdks`.
 
 ## Comandos
 
@@ -23,7 +23,7 @@ Estado actual: salud (`GET /health`), CORS, formato único de errores y document
 
 Con la API levantada:
 
-- `curl http://localhost:5080/health` → `{"status":"ok"}`
+- `curl.exe http://localhost:5080/health` (en Windows PowerShell 5.1 `curl` es un alias de `Invoke-WebRequest`, por eso se usa `curl.exe`) → `{"status":"ok"}`
 - `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código.
 
 ## Configuración
@@ -34,6 +34,9 @@ variable de entorno pisa al archivo.
 | Clave | Uso | Valor por defecto (local) |
 |---|---|---|
 | `ALLOWED_ORIGINS` | Orígenes permitidos por CORS, separados por comas | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
+
+En Render, `ALLOWED_ORIGINS` debe definirse como variable de entorno: los valores por defecto de
+`appsettings.json` incluyen orígenes `localhost`.
 
 Ningún secreto se guarda en el repo.
 
@@ -87,7 +90,9 @@ archivos intermedios del build y de la restauración de paquetes (parecido a una
 
 Un request pasa por una cadena de middlewares (como en Express) antes de llegar al endpoint:
 
-1. **Ruteo**: ASP.NET decide qué endpoint corresponde a la URL y al método.
+1. **Ruteo**: ASP.NET decide qué endpoint corresponde a la URL y al método. No tiene una línea en
+   `Program.cs`: `WebApplication` agrega implícitamente los middlewares de ruteo y de ejecución de
+   endpoints.
 2. **Manejo de errores** (`app.UseApiErrors()` en `Program.cs`): si algo más adelante lanza una
    excepción, responde 500 `internal_error`; si la respuesta termina en 4xx/5xx sin cuerpo (por
    ejemplo, ninguna ruta coincidió), escribe el cuerpo de error con el formato único.
@@ -103,7 +108,9 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | `.csproj` + paquetes NuGet (`dotnet add package`) | `package.json` + npm (`npm install`) | `src/DevportalApi/DevportalApi.csproj` |
 | `dotnet` CLI (`run`, `test`, `build`, `format`) | Scripts de npm (`npm run dev`, `npm test`, …) | Sección "Comandos" |
 | `Program.cs` con top-level statements | El `index.ts` de un server Express | `src/DevportalApi/Program.cs` |
-| `namespace` + `using` | `export` + `import` | Primeras líneas de cada `.cs` |
+| `namespace` + `using` | Los módulos y los `import`, pero sin relación con archivos: `using` importa un namespace (no un archivo) y la visibilidad se define con `public`/`internal`, no con `export` | `using DevportalApi.Endpoints;` en `Program.cs` |
+| Primary constructor `class CorsTests(ApiFactory factory)` | Constructor con parameter properties (`constructor(private factory: ApiFactory)`) | `CorsTests.cs`, `HealthTests.cs`, `ErrorTests.cs` |
+| Collection expression `[]` | Un array literal `[]` | `?? []` en `Program.cs` |
 | `record` | Un `type` inmutable para datos | `HealthResponse`, `ErrorResponse` |
 | Inyección de dependencias (`builder.Services.Add…`) | Registrar dependencias en un contenedor en vez de importarlas a mano | `AddCors`, `AddOpenApi` en `Program.cs` |
 | Middlewares (`app.Use…`) | `app.use(...)` de Express | `UseApiErrors`, `UseCors` |
@@ -117,6 +124,15 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 
 Notas:
 
+- **Namespaces y `using`**: `HealthEndpoints.cs` y `ApiErrors.cs` no tienen `using` porque
+  `<ImplicitUsings>enable</ImplicitUsings>` en el `.csproj` agrega automáticamente `using`
+  globales para los namespaces más comunes (`System`, `System.Linq`, `Microsoft.AspNetCore.Builder`,
+  etc.). Solo hacen falta `using` explícitos para el resto, como los de `Program.cs`.
+- **Primary constructors**: en `public class CorsTests(ApiFactory factory)` el parámetro `factory`
+  está disponible en todo el cuerpo de la clase (por ejemplo, para inicializar `_client`); no hace
+  falta declarar un campo ni asignarlo en un constructor aparte.
+- **Collection expressions**: `?? []` en `Program.cs` es un array vacío; el compilador infiere el
+  tipo (`string[]`) por el contexto.
 - **Records**: `public sealed record HealthResponse(string Status);` define en una línea un tipo con
   la propiedad `Status`, igualdad por valor y sin herencia (`sealed`). Al serializarse sale
   `{"status":"ok"}`.
