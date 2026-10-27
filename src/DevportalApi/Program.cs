@@ -28,9 +28,13 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.N
 var productionUrl = builder.Configuration["PROD_URL"] is { Length: > 0 } prodUrl
     ? prodUrl
     : OpenApiDocumentation.DefaultProductionUrl;
-builder.Services.AddOpenApi(options => options
-    .AddPortalApiDocumentation(productionUrl)
-    .AddPortalApiSecurity());
+// One OpenAPI document per version (/openapi/v1.json and /openapi/v2.json); `dotnet build` writes both to openapi/.
+foreach (var version in Enum.GetValues<PortalApiVersion>())
+{
+    builder.Services.AddOpenApi(version.ToString().ToLowerInvariant(), options => options
+        .AddPortalApiDocumentation(version, productionUrl)
+        .AddPortalApiSecurity(version));
+}
 
 // Fails at startup (before serving requests) if JWT_SECRET is missing or too short.
 // The spec generator never serves requests, so it gets a random throwaway secret instead.
@@ -90,13 +94,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapOpenApi();
-app.MapHealthEndpoints();
-app.MapApisEndpoints();
-app.MapClientsEndpoints();
-app.MapAuthEndpoints();
-app.MapOAuthEndpoints();
-app.MapDashboardEndpoints();
-app.MapSubscriptionsEndpoints();
-app.MapUsageEndpoints();
+app.MapPortalApi();
 
 app.Run();

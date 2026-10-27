@@ -1,3 +1,4 @@
+using DevportalApi.Endpoints;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
@@ -11,8 +12,10 @@ public static class OpenApiSecurity
     public const string ApiKeySchemeName = "apiKeyAuth";
     public const string OAuth2SchemeName = "oauth2";
 
-    public static OpenApiOptions AddPortalApiSecurity(this OpenApiOptions options)
+    public static OpenApiOptions AddPortalApiSecurity(this OpenApiOptions options, PortalApiVersion version)
     {
+        var p = version.PathPrefix();
+
         // Document transformer: runs once and edits the whole document.
         options.AddDocumentTransformer((document, _, _) =>
         {
@@ -23,27 +26,27 @@ public static class OpenApiSecurity
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",
                 BearerFormat = "JWT",
-                Description = "Token obtenido con POST /auth/token.",
+                Description = $"Token obtenido con POST {p}/auth/token.",
             };
             document.Components.SecuritySchemes[ApiKeySchemeName] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.ApiKey,
                 In = ParameterLocation.Header,
                 Name = ApiKeyAuthenticationHandler.HeaderName,
-                Description = "API key demo, pública a propósito: `demo-api-key`. Solo sirve para GET /usage.",
+                Description = $"API key demo, pública a propósito: `demo-api-key`. Solo sirve para GET {p}/usage.",
             };
             document.Components.SecuritySchemes[OAuth2SchemeName] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.OAuth2,
                 Description =
                     "Client credentials con el cliente demo, público a propósito: `portal-demo` / `portal-demo-secret`. " +
-                    "El token actúa en nombre del usuario demo y solo sirve para GET /subscriptions.",
+                    $"El token actúa en nombre del usuario demo y solo sirve para GET {p}/subscriptions.",
                 Flows = new OpenApiOAuthFlows
                 {
                     ClientCredentials = new OpenApiOAuthFlow
                     {
                         // Relative: resolved against the selected server, so it works in production and locally.
-                        TokenUrl = new Uri("/oauth/token", UriKind.Relative),
+                        TokenUrl = new Uri($"{p}/oauth/token", UriKind.Relative),
                         Scopes = new Dictionary<string, string>
                         {
                             [AuthPolicies.SubscriptionsReadScope] = "Leer las suscripciones del usuario demo.",

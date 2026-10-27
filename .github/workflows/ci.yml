@@ -28,8 +28,11 @@ jobs:
       - name: Build
         run: dotnet build
 
-      - name: Check that the committed OpenAPI spec is up to date
-        run: git diff --exit-code openapi/portal-api.json
+      - name: Check that the committed OpenAPI specs are up to date
+        # git diff catches changed files; git status also catches a new document that was never committed.
+        run: |
+          git diff --exit-code openapi/
+          test -z "$(git status --porcelain openapi/)"
 
       - name: Test
         run: dotnet test --no-build
@@ -64,6 +67,10 @@ jobs:
           # "clasico" (no accent) only matches the Petstore API ("clásico") if the image has ICU.
           curl -fsS "http://localhost:8080/apis?q=clasico" | tee apis.json
           jq -e 'length > 0 and any(.[]; .id == "petstore")' apis.json
+
+          # v2: paged list.
+          curl -fsS "http://localhost:8080/v2/apis?pageSize=1" | tee apis-v2.json
+          jq -e '.total == 3 and (.items | length) == 1' apis-v2.json
 
           status=$(curl -s -o stats.json -w '%{http_code}' http://localhost:8080/dashboard/stats)
           cat stats.json

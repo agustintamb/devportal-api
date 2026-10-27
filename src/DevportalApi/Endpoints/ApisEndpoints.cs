@@ -16,17 +16,25 @@ public static class ApisEndpoints
         FROM apis
         """;
 
-    public static IEndpointRouteBuilder MapApisEndpoints(this IEndpointRouteBuilder app)
+    private const string SearchDescription =
+        "Texto a buscar en el nombre, la descripción y los tags, sin distinguir mayúsculas ni acentos.";
+
+    private const string CategoryDescription = "Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Datos abiertos`).";
+
+    public static IEndpointRouteBuilder MapApisEndpoints(this IEndpointRouteBuilder app, PortalApiVersion version)
     {
         var group = app.MapGroup("/apis").WithTags("Catálogo");
 
-        group.MapGet("", ListApisAsync)
-            .WithName("listApis")
-            .WithSummary("Listar el catálogo de APIs")
-            .Produces<IReadOnlyList<ApiDto>>();
+        var list = version == PortalApiVersion.V1
+            ? group.MapGet("", ListApisAsync).Produces<IReadOnlyList<ApiDto>>()
+            : group.MapGet("", ListApisPageAsync)
+                .Produces<PagedResponse<ApiDto>>()
+                .ProducesError(StatusCodes.Status400BadRequest, Paging.ErrorDescription);
+        list.WithName(version.EndpointName("listApis"))
+            .WithSummary("Listar el catálogo de APIs");
 
         group.MapGet("/{id}", GetApiAsync)
-            .WithName("getApi")
+            .WithName(version.EndpointName("getApi"))
             .WithSummary("Obtener una API del catálogo")
             .Produces<ApiDto>()
             .ProducesError(StatusCodes.Status404NotFound, "No existe una API con ese id (`not_found`).");
@@ -38,8 +46,21 @@ public static class ApisEndpoints
     // [Description] becomes the parameter description in the OpenAPI spec.
     private static async Task<IResult> ListApisAsync(
         Database database,
-        [Description("Texto a buscar en el nombre, la descripción y los tags, sin distinguir mayúsculas ni acentos.")] string? q,
-        [Description("Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Datos abiertos`).")] string? category)
+        [Description(SearchDescription)] string? q,
+        [Description(CategoryDescription)] string? category) =>
+        TypedResults.Ok(await QueryApisAsync(database, q, category));
+
+    // v2: same query, then the page. Optional ints with a default: a missing value takes the default.
+    private static async Task<IResult> ListApisPageAsync(
+        Database database,
+        [Description(SearchDescription)] string? q,
+        [Description(CategoryDescription)] string? category,
+        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
+        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize) =>
+        Paging.Validate(page, pageSize)
+        ?? TypedResults.Ok(Paging.Paginate(await QueryApisAsync(database, q, category), page, pageSize));
+
+    private static async Task<List<ApiDto>> QueryApisAsync(Database database, string? q, string? category)
     {
         await using var connection = await database.OpenConnectionAsync();
         // ORDER BY rowid = seed insertion order = portal order.
@@ -48,15 +69,13 @@ public static class ApisEndpoints
             new { category = string.IsNullOrWhiteSpace(category) ? null : category.Trim() });
 
         var search = q?.Trim();
-        var apis = rows
+        return rows
             .Select(ToDto)
             .Where(api => string.IsNullOrEmpty(search)
                 || ContainsText(api.Name, search)
                 || ContainsText(api.Description, search)
                 || api.Tags.Any(tag => ContainsText(tag, search)))
             .ToList();
-
-        return TypedResults.Ok(apis);
     }
 
     private static async Task<IResult> GetApiAsync(

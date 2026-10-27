@@ -18,21 +18,30 @@ public static class DashboardEndpoints
 
     private static readonly string[] _activityStatuses = ["success", "error", "pending"];
 
-    public static IEndpointRouteBuilder MapDashboardEndpoints(this IEndpointRouteBuilder app)
+    private const string StatusDescription = "Filtra por estado; sin el parámetro devuelve toda la actividad.";
+
+    public static IEndpointRouteBuilder MapDashboardEndpoints(this IEndpointRouteBuilder app, PortalApiVersion version)
     {
         // RequireAuthorization on the group: every route below needs a valid user JWT (the default policy).
         var group = app.MapGroup("/dashboard").WithTags("Dashboard").RequireAuthorization();
 
         group.MapGet("/stats", GetStats)
-            .WithName("getDashboardStats")
+            .WithName(version.EndpointName("getDashboardStats"))
             .WithSummary("Obtener las métricas del dashboard")
             .Produces<IReadOnlyList<StatDto>>();
 
-        group.MapGet("/activity", ListActivityAsync)
-            .WithName("listDashboardActivity")
-            .WithSummary("Listar la actividad reciente")
-            .Produces<IReadOnlyList<ActivityDto>>()
-            .ProducesError(StatusCodes.Status400BadRequest, "El parámetro `status` no es success, error ni pending (`validation_error`).");
+        var list = version == PortalApiVersion.V1
+            ? group.MapGet("/activity", ListActivityAsync)
+                .Produces<IReadOnlyList<ActivityDto>>()
+                .ProducesError(StatusCodes.Status400BadRequest, "El parámetro `status` no es success, error ni pending (`validation_error`).")
+            : group.MapGet("/activity", ListActivityPageAsync)
+                .Produces<PagedResponse<ActivityDto>>()
+                .ProducesError(
+                    StatusCodes.Status400BadRequest,
+                    "El parámetro `status` no es success, error ni pending, o `page` o `pageSize` están fuera de rango " +
+                    "o no son números (`validation_error`).");
+        list.WithName(version.EndpointName("listDashboardActivity"))
+            .WithSummary("Listar la actividad reciente");
 
         return app;
     }
@@ -41,17 +50,37 @@ public static class DashboardEndpoints
 
     private static async Task<IResult> ListActivityAsync(
         Database database,
-        [Description("Filtra por estado; sin el parámetro devuelve toda la actividad.")] string? status)
+        [Description(StatusDescription)] string? status) =>
+        IsValidStatus(status)
+            ? TypedResults.Ok(await QueryActivityAsync(database, status))
+            : InvalidStatus();
+
+    private static async Task<IResult> ListActivityPageAsync(
+        Database database,
+        [Description(StatusDescription)] string? status,
+        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
+        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize)
     {
-        var filter = string.IsNullOrWhiteSpace(status) ? null : status.Trim();
-        if (filter is not null && !_activityStatuses.Contains(filter))
+        if (!IsValidStatus(status))
         {
-            return ApiErrors.Problem(
-                StatusCodes.Status400BadRequest,
-                "validation_error",
-                "El parámetro 'status' debe ser success, error o pending.");
+            return InvalidStatus();
         }
 
+        return Paging.Validate(page, pageSize)
+            ?? TypedResults.Ok(Paging.Paginate(await QueryActivityAsync(database, status), page, pageSize));
+    }
+
+    private static bool IsValidStatus(string? status) =>
+        string.IsNullOrWhiteSpace(status) || _activityStatuses.Contains(status.Trim());
+
+    private static IResult InvalidStatus() =>
+        ApiErrors.Problem(
+            StatusCodes.Status400BadRequest,
+            "validation_error",
+            "El parámetro 'status' debe ser success, error o pending.");
+
+    private static async Task<List<ActivityDto>> QueryActivityAsync(Database database, string? status)
+    {
         await using var connection = await database.OpenConnectionAsync();
         var activity = await connection.QueryAsync<ActivityDto>(
             """
@@ -60,8 +89,8 @@ public static class DashboardEndpoints
             WHERE @status IS NULL OR status = @status
             ORDER BY id
             """,
-            new { status = filter });
+            new { status = string.IsNullOrWhiteSpace(status) ? null : status.Trim() });
 
-        return TypedResults.Ok(activity);
+        return activity.AsList();
     }
 }

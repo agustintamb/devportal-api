@@ -15,6 +15,9 @@ public sealed record ApiDto(
 
 public sealed record ClientDto(string Name, string Slug);
 
+// Response of the v2 lists; `Total` counts every item (after filters), not only this page.
+public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);
+
 public sealed record TokenRequest(string Username, string Password);
 
 public sealed record TokenResponse(string AccessToken, string TokenType, int ExpiresIn);

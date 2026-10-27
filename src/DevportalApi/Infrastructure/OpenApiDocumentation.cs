@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using DevportalApi.Endpoints;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.OpenApi;
@@ -11,30 +12,49 @@ public static class OpenApiDocumentation
     public const string DefaultProductionUrl = "https://devportal-api.onrender.com";
     private const string LocalUrl = "http://localhost:5080";
 
-    private const string Description = """
-        API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard,
-        suscripciones del usuario y consumo de la API key. Los endpoints de **Dashboard** y **Suscripciones**
-        requieren un token, **Uso** requiere una API key y el resto es público.
+    // Built per version: the steps use that version's paths (`/auth/token` or `/v2/auth/token`).
+    private static string Description(PortalApiVersion version)
+    {
+        var p = version.PathPrefix();
+        var intro = """
+            API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard,
+            suscripciones del usuario y consumo de la API key. Los endpoints de **Dashboard** y **Suscripciones**
+            requieren un token, **Uso** requiere una API key y el resto es público.
+            """;
+        var paging = $$"""
+            **Paginación (v2)**
 
-        **Cómo probar un endpoint privado**
+            Los listados (`GET {{p}}/apis`, `GET {{p}}/clients`, `GET {{p}}/dashboard/activity` y `GET {{p}}/subscriptions`)
+            reciben `page` (desde 1, por defecto {{Paging.DefaultPage}}) y `pageSize` (entre 1 y {{Paging.MaxPageSize}}, por
+            defecto {{Paging.DefaultPageSize}}) y responden `{ items, page, pageSize, total }`; `total` cuenta todos los ítems
+            después de los filtros. Un valor fuera de rango o no numérico responde 400 `validation_error`, y una
+            página más allá del final, `items` vacío. El resto de los endpoints es igual que en la v1.
+            """;
+        var steps = $$"""
+            **Cómo probar un endpoint privado**
 
-        1. Llamar a `POST /auth/token` con el usuario demo (credenciales públicas a propósito):
-           `{ "username": "demo", "password": "demo1234" }`.
-        2. Copiar el `accessToken` de la respuesta (vence en una hora).
-        3. Pegarlo en la sección **Autorización** (esquema `bearerAuth`); se envía como
-           `Authorization: Bearer <token>`.
-        4. Llamar a un endpoint privado, por ejemplo `GET /dashboard/stats` o `POST /subscriptions`.
+            1. Llamar a `POST {{p}}/auth/token` con el usuario demo (credenciales públicas a propósito):
+               `{ "username": "demo", "password": "demo1234" }`.
+            2. Copiar el `accessToken` de la respuesta (vence en una hora).
+            3. Pegarlo en la sección **Autorización** (esquema `bearerAuth`); se envía como
+               `Authorization: Bearer <token>`.
+            4. Llamar a un endpoint privado, por ejemplo `GET {{p}}/dashboard/stats` o `POST {{p}}/subscriptions`.
 
-        **Otras formas de autenticación**
+            **Otras formas de autenticación**
 
-        - **API key** (esquema `apiKeyAuth`): `GET /usage` se llama con el header `X-API-Key: demo-api-key`.
-        - **OAuth2 client credentials** (esquema `oauth2`): `POST /oauth/token` con el cliente `portal-demo` /
-          `portal-demo-secret` emite un token con el scope `subscriptions:read`, que actúa en nombre del
-          usuario demo y solo sirve para `GET /subscriptions`; en los demás endpoints privados responde 403.
+            - **API key** (esquema `apiKeyAuth`): `GET {{p}}/usage` se llama con el header `X-API-Key: demo-api-key`.
+            - **OAuth2 client credentials** (esquema `oauth2`): `POST {{p}}/oauth/token` con el cliente `portal-demo` /
+              `portal-demo-secret` emite un token con el scope `subscriptions:read`, que actúa en nombre del
+              usuario demo y solo sirve para `GET {{p}}/subscriptions`; en los demás endpoints privados responde 403.
 
-        Los datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que
-        las suscripciones creadas no son permanentes.
-        """;
+            Los datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que
+            las suscripciones creadas no son permanentes.
+            """;
+
+        string[] sections = version == PortalApiVersion.V2 ? [intro, paging, steps] : [intro, steps];
+        // ReplaceLineEndings: the raw strings have the .cs file's line endings (CRLF on a Windows checkout).
+        return string.Join("\n\n", sections).ReplaceLineEndings("\n");
+    }
 
     // Order of the sections in the spec (and in the portal menu). A tag missing here goes last, by name.
     private static readonly string[] _tagOrder = ["Salud", "Autenticación", "Catálogo", "Clientes", "Dashboard", "Suscripciones"];
@@ -72,16 +92,20 @@ public static class OpenApiDocumentation
     // Values of apis.visibility in seed.sql: "internal" = the company's own API, "public" = third party.
     private static readonly string[] _visibilities = ["internal", "public"];
 
-    public static OpenApiOptions AddPortalApiDocumentation(this OpenApiOptions options, string productionUrl)
+    public static OpenApiOptions AddPortalApiDocumentation(this OpenApiOptions options, PortalApiVersion version, string productionUrl)
     {
+        // v1 takes the endpoints without a group name; v2, the ones in the "v2" group (see PortalApiEndpoints).
+        options.ShouldInclude = description => version == PortalApiVersion.V2
+            ? description.GroupName == PortalApiEndpoints.V2GroupName
+            : description.GroupName is null;
+
         options.AddDocumentTransformer((document, _, _) =>
         {
-            // ReplaceLineEndings: the raw string has the .cs file's line endings (CRLF on a Windows checkout).
             document.Info = new OpenApiInfo
             {
                 Title = "Portal API",
-                Version = "1.0.0",
-                Description = Description.ReplaceLineEndings("\n"),
+                Version = version == PortalApiVersion.V2 ? "2.0.0" : "1.0.0",
+                Description = Description(version),
             };
             document.Servers =
             [

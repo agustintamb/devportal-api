@@ -16,12 +16,12 @@ public static class OAuthEndpoints
     // The demo client acts on behalf of the demo user, limited to these scopes.
     private static readonly string[] _demoClientScopes = [AuthPolicies.SubscriptionsReadScope];
 
-    public static IEndpointRouteBuilder MapOAuthEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapOAuthEndpoints(this IEndpointRouteBuilder app, PortalApiVersion version)
     {
         var group = app.MapGroup("/oauth").WithTags("Autenticación");
 
         group.MapPost("/token", CreateTokenAsync)
-            .WithName("createOAuthToken")
+            .WithName(version.EndpointName("createOAuthToken"))
             .WithSummary("Obtener un token con OAuth2 client credentials")
             .WithDescription(
                 "Cliente demo, público a propósito: `client_id` `portal-demo` y `client_secret` `portal-demo-secret`, " +

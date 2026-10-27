@@ -8,12 +8,12 @@ public static class AuthEndpoints
     public const string DemoUsername = "demo";
     private const string DemoPassword = "demo1234";
 
-    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app, PortalApiVersion version)
     {
         var group = app.MapGroup("/auth").WithTags("Autenticación");
 
         group.MapPost("/token", CreateToken)
-            .WithName("createToken")
+            .WithName(version.EndpointName("createToken"))
             .WithSummary("Obtener un token de acceso con el usuario demo")
             .WithDescription(
                 "Credenciales demo, públicas a propósito: usuario `demo` y contraseña `demo1234`. " +

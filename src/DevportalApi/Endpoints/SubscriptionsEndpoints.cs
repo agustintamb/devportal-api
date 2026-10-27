@@ -19,20 +19,26 @@ public static class SubscriptionsEndpoints
     private const string SubscriptionNotFoundDescription =
         "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).";
 
-    public static IEndpointRouteBuilder MapSubscriptionsEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapSubscriptionsEndpoints(this IEndpointRouteBuilder app, PortalApiVersion version)
     {
         // Authorization per route: listing also accepts OAuth client tokens with subscriptions:read; the rest, only user tokens.
         var group = app.MapGroup("/subscriptions").WithTags("Suscripciones");
 
-        group.MapGet("", ListSubscriptionsAsync)
-            .RequireAuthorization(AuthPolicies.SubscriptionsRead)
-            .WithName("listSubscriptions")
-            .WithSummary("Listar las suscripciones del usuario")
-            .Produces<IReadOnlyList<SubscriptionDto>>();
+        var list = version == PortalApiVersion.V1
+            ? group.MapGet("", ListSubscriptionsAsync).Produces<IReadOnlyList<SubscriptionDto>>()
+            : group.MapGet("", ListSubscriptionsPageAsync)
+                .Produces<PagedResponse<SubscriptionDto>>()
+                .ProducesError(StatusCodes.Status400BadRequest, Paging.ErrorDescription);
+        list.RequireAuthorization(AuthPolicies.SubscriptionsRead)
+            .WithName(version.EndpointName("listSubscriptions"))
+            .WithSummary("Listar las suscripciones del usuario");
 
-        group.MapPost("", CreateSubscriptionAsync)
+        // The lambda passes the version's path prefix, so the Location header points to /v2/subscriptions/{id} in v2.
+        var pathPrefix = version.PathPrefix();
+        group.MapPost("", (CreateSubscriptionRequest request, Database database, ClaimsPrincipal user) =>
+                CreateSubscriptionAsync(request, database, user, pathPrefix))
             .RequireAuthorization()
-            .WithName("createSubscription")
+            .WithName(version.EndpointName("createSubscription"))
             .WithSummary("Suscribirse a una API del catálogo")
             .Produces<SubscriptionDto>(StatusCodes.Status201Created)
             .ProducesError(StatusCodes.Status400BadRequest, "Falta `apiId`, `plan` no es free ni pro o el JSON está mal formado (`validation_error`).")
@@ -42,14 +48,14 @@ public static class SubscriptionsEndpoints
         // `:guid` is a route constraint: a non-GUID id matches no route, so the global 404 answers it.
         group.MapGet("/{id:guid}", GetSubscriptionAsync)
             .RequireAuthorization()
-            .WithName("getSubscription")
+            .WithName(version.EndpointName("getSubscription"))
             .WithSummary("Obtener una suscripción del usuario")
             .Produces<SubscriptionDto>()
             .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         group.MapPatch("/{id:guid}", UpdateSubscriptionAsync)
             .RequireAuthorization()
-            .WithName("updateSubscription")
+            .WithName(version.EndpointName("updateSubscription"))
             .WithSummary("Cambiar el plan de una suscripción")
             .Produces<SubscriptionDto>()
             .ProducesError(StatusCodes.Status400BadRequest, "`plan` no es free ni pro o el JSON está mal formado (`validation_error`).")
@@ -57,7 +63,7 @@ public static class SubscriptionsEndpoints
 
         group.MapDelete("/{id:guid}", DeleteSubscriptionAsync)
             .RequireAuthorization()
-            .WithName("deleteSubscription")
+            .WithName(version.EndpointName("deleteSubscription"))
             .WithSummary("Cancelar una suscripción")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
@@ -66,7 +72,18 @@ public static class SubscriptionsEndpoints
     }
 
     // ASP.NET passes the authenticated user (HttpContext.User) to any ClaimsPrincipal parameter.
-    private static async Task<IResult> ListSubscriptionsAsync(Database database, ClaimsPrincipal user)
+    private static async Task<IResult> ListSubscriptionsAsync(Database database, ClaimsPrincipal user) =>
+        TypedResults.Ok(await QuerySubscriptionsAsync(database, user));
+
+    private static async Task<IResult> ListSubscriptionsPageAsync(
+        Database database,
+        ClaimsPrincipal user,
+        [Description(Paging.PageDescription)] int page = Paging.DefaultPage,
+        [Description(Paging.PageSizeDescription)] int pageSize = Paging.DefaultPageSize) =>
+        Paging.Validate(page, pageSize)
+        ?? TypedResults.Ok(Paging.Paginate(await QuerySubscriptionsAsync(database, user), page, pageSize));
+
+    private static async Task<List<SubscriptionDto>> QuerySubscriptionsAsync(Database database, ClaimsPrincipal user)
     {
         await using var connection = await database.OpenConnectionAsync();
         // ORDER BY rowid = insertion order = creation order.
@@ -74,13 +91,14 @@ public static class SubscriptionsEndpoints
             $"{SelectSubscriptions} WHERE user_name = @userName ORDER BY rowid",
             new { userName = UserName(user) });
 
-        return TypedResults.Ok(rows.Select(ToDto).ToList());
+        return rows.Select(ToDto).ToList();
     }
 
     private static async Task<IResult> CreateSubscriptionAsync(
         CreateSubscriptionRequest request,
         Database database,
-        ClaimsPrincipal user)
+        ClaimsPrincipal user,
+        string pathPrefix)
     {
         if (string.IsNullOrWhiteSpace(request.ApiId))
         {
@@ -129,7 +147,7 @@ public static class SubscriptionsEndpoints
                 $"Ya existe una suscripción a la API '{request.ApiId}'.");
         }
 
-        return TypedResults.Created($"/subscriptions/{subscription.Id}", subscription);
+        return TypedResults.Created($"{pathPrefix}/subscriptions/{subscription.Id}", subscription);
     }
 
     private static async Task<IResult> GetSubscriptionAsync(

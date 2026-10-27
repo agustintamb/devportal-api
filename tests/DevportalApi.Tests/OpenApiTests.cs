@@ -273,18 +273,41 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     // Fails when the code changes the spec but the committed file was not regenerated with `dotnet build`.
-    [Fact]
-    public async Task CommittedSpecFile_MatchesServedDocument()
+    [Theory]
+    [InlineData("v1", "portal-api.json")]
+    [InlineData("v2", "portal-api_v2.json")]
+    public async Task CommittedSpecFile_MatchesServedDocument(string documentName, string fileName)
     {
-        var committedPath = Path.Combine(RepositoryRoot(), "openapi", "portal-api.json");
+        var committedPath = Path.Combine(RepositoryRoot(), "openapi", fileName);
         Assert.True(File.Exists(committedPath), $"Missing {committedPath}; run `dotnet build` to generate it.");
 
         var committed = JsonNode.Parse(await File.ReadAllTextAsync(committedPath));
-        var served = JsonNode.Parse(await _client.GetStringAsync("/openapi/v1.json"));
+        var served = JsonNode.Parse(await _client.GetStringAsync($"/openapi/{documentName}.json"));
 
         Assert.True(
             JsonNode.DeepEquals(committed, served),
-            "openapi/portal-api.json is out of date; run `dotnet build` and commit the regenerated file.");
+            $"openapi/{fileName} is out of date; run `dotnet build` and commit the regenerated file.");
+    }
+
+    [Fact]
+    public async Task V2Document_HasEveryV1OperationUnderV2AndPagedLists()
+    {
+        var v1 = await GetDocumentAsync();
+        var v2 = await _client.GetFromJsonAsync<JsonElement>("/openapi/v2.json");
+
+        Assert.Equal("2.0.0", v2.GetProperty("info").GetProperty("version").GetString());
+        Assert.Contains("POST /v2/auth/token", v2.GetProperty("info").GetProperty("description").GetString());
+        Assert.DoesNotContain(Operations(v1).Keys, key => key.Contains("/v2/"));
+        Assert.Equal(
+            Operations(v1).Keys.Select(key => key.Replace(" /", " /v2/")).Order(),
+            Operations(v2).Keys.Order());
+
+        var listApis = Operations(v2)["get /v2/apis"];
+        Assert.Equal("listApisV2", listApis.GetProperty("operationId").GetString());
+        var paging = listApis.GetProperty("parameters").EnumerateArray()
+            .Where(parameter => parameter.GetProperty("name").GetString() is "page" or "pageSize")
+            .Select(parameter => (parameter.GetProperty("schema").GetProperty("type").GetString(), parameter.GetProperty("schema").GetProperty("default").GetInt32()));
+        Assert.Equal([("integer", 1), ("integer", 20)], paging);
     }
 
     private async Task<JsonElement> GetDocumentAsync() =>

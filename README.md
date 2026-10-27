@@ -10,7 +10,9 @@ Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis
 con API key (`GET /usage`), token OAuth2 client credentials (`POST /oauth/token`), base
 SQLite sembrada al arrancar, CORS, formato único de errores y especificación OpenAPI generada desde
 el código: se sirve en `/openapi/v1.json` y cada `dotnet build` la escribe en `openapi/portal-api.json`
-(el archivo que copia el portal). Se despliega en Render como imagen Docker, con CI en GitHub
+(el archivo que copia el portal). Además hay una **v2** bajo `/v2/...` con los mismos endpoints y los
+listados paginados (ver "Versiones (v1 y v2)"), con su spec en `/openapi/v2.json` y
+`openapi/portal-api_v2.json`. Se despliega en Render como imagen Docker, con CI en GitHub
 Actions (ver "Deploy").
 
 ## Requisitos
@@ -32,7 +34,7 @@ dotnet user-secrets set JWT_SECRET "<un texto aleatorio de 32 caracteres o más>
 | `dotnet run --project src/DevportalApi` | Levanta la API en `http://localhost:5080` |
 | `dotnet user-secrets list --project src/DevportalApi` | Muestra los secretos locales guardados |
 | `dotnet test` | Corre los tests de integración |
-| `dotnet build` | Compila la solución (los warnings cuentan como errores) y regenera `openapi/portal-api.json` |
+| `dotnet build` | Compila la solución (los warnings cuentan como errores) y regenera `openapi/portal-api.json` y `openapi/portal-api_v2.json` |
 | `dotnet format` | Formatea el código según `.editorconfig` |
 | `dotnet format --verify-no-changes` | Falla si hay algo sin formatear (para CI) |
 
@@ -40,6 +42,8 @@ Con la API levantada:
 
 - `curl.exe http://localhost:5080/health` (en Windows PowerShell 5.1 `curl` es un alias de `Invoke-WebRequest`, por eso se usa `curl.exe`) → `{"status":"ok"}`
 - `curl.exe "http://localhost:5080/apis?q=pokemon"` → solo la PokeAPI.
+- `curl.exe "http://localhost:5080/v2/apis?pageSize=1"` → la primera página de la v2:
+  `{ "items": [ …portal… ], "page": 1, "pageSize": 1, "total": 3 }`.
 - `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código (la
   misma que `openapi/portal-api.json`; ver "Especificación OpenAPI").
 
@@ -132,6 +136,56 @@ y públicas a propósito):
   usa por defecto); si viene el header, se usa ese.
 - **Errores de `POST /oauth/token`**: siguen el estándar OAuth 2.0 (`{ "error", "error_description" }`),
   una excepción documentada al formato único (ver "Formato de errores").
+
+## Versiones (v1 y v2)
+
+La v1 son las rutas sin prefijo (`/apis`, `/clients`, …) y no cambia. La v2 vive bajo `/v2/...` y
+expone **todos** los endpoints de la v1 con la misma lógica, la misma autenticación y los mismos
+errores, salvo los cuatro listados, que están **paginados**:
+
+| v2 | Query string |
+|---|---|
+| `GET /v2/apis` | `q`, `category`, `page`, `pageSize` (el filtro se aplica antes de paginar) |
+| `GET /v2/clients` | `page`, `pageSize` |
+| `GET /v2/dashboard/activity` | `status`, `page`, `pageSize` (privado) |
+| `GET /v2/subscriptions` | `page`, `pageSize` (privado) |
+
+- `page`: desde 1, por defecto 1. `pageSize`: entre 1 y 100, por defecto 20.
+- Respuesta: `{ "items": [...], "page": 1, "pageSize": 20, "total": 3 }`; `total` cuenta todos los
+  ítems que cumplen los filtros, no solo los de la página. Una página más allá del final responde
+  200 con `items: []`.
+- Un valor fuera de rango (`page=0`, `pageSize=500`) o no numérico (`page=abc`) responde 400
+  `validation_error`. El fuera de rango lo detecta `Paging.Validate`; el no numérico ni llega al
+  endpoint: ASP.NET no puede convertir `abc` a `int` y el manejo global de errores responde el
+  mismo 400.
+- `POST /v2/subscriptions` devuelve `Location: /v2/subscriptions/{id}`.
+- Los `operationId` de la v2 llevan el sufijo `V2` (`listApisV2`): ASP.NET exige nombres de
+  endpoint únicos y la v1 ya usa `listApis`.
+
+**Cómo está armado** (`Endpoints/PortalApiEndpoints.cs`): `Program.cs` llama una sola vez a
+`app.MapPortalApi()`, que llama a todos los `Map…Endpoints(version)` dos veces: sobre `app` (v1) y
+sobre `app.MapGroup("/v2").WithGroupName("v2")` (v2). Cada `Map…Endpoints` recibe la versión
+(`PortalApiVersion.V1` o `V2`) y solo la usa para el nombre del endpoint y, en los listados, para
+elegir el handler: el de v2 reutiliza la misma consulta (un método privado que devuelve la lista) y
+la corta con `Paging.Paginate`. `WithGroupName("v2")` es lo que separa los documentos OpenAPI: el
+`v1` toma los endpoints sin grupo y el `v2` solo los del grupo `v2`.
+
+**Por qué no `Asp.Versioning`**: ese paquete resuelve versiones por header, query o media type,
+deprecaciones y reportes de versiones soportadas. Acá hay dos versiones fijas por URL, y un
+`MapGroup` las resuelve sin una dependencia ni conceptos nuevos.
+
+En TypeScript sería como armar el router de Express con una función y montarlo dos veces:
+
+```ts
+function portalApi(version: "v1" | "v2") {
+  const router = express.Router();
+  router.get("/apis", version === "v1" ? listApis : listApisPage);
+  // ...el resto de las rutas, iguales en las dos versiones
+  return router;
+}
+app.use("/", portalApi("v1"));
+app.use("/v2", portalApi("v2"));
+```
 
 ## Base de datos
 
@@ -232,6 +286,12 @@ prueba, `servers`, descripciones de los tags, enums y textos en español) y de
 y 403 en los endpoints protegidos, según la policy de cada uno). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
 `openapi/portal-api.json`, que se versiona y es la que copia el portal.
 
+- **Dos documentos**: `Program.cs` registra un `AddOpenApi` por versión (`v1` y `v2`), con los
+  mismos transformers. La v2 se sirve en `/openapi/v2.json` y el build la escribe en
+  `openapi/portal-api_v2.json` (el generador agrega `_<documento>` a todo documento que no se llama
+  `v1`). Sus diferencias: `info.version` `2.0.0`, una sección "Paginación (v2)" en la descripción,
+  rutas `/v2/...` en los pasos de prueba y en los esquemas de seguridad (`tokenUrl`
+  `/v2/oauth/token`). Servers y orden de tags son iguales.
 - **Generación en el build**: el paquete `Microsoft.Extensions.ApiDescription.Server` agrega un paso
   al build que arranca la API con la herramienta `GetDocument.Insider` y guarda el documento. La
   carpeta y el nombre del archivo salen de `OpenApiDocumentsDirectory` y
@@ -243,9 +303,10 @@ y 403 en los endpoints protegidos, según la policy de cada uno). La API la sirv
   `openapi/`.
 - **Mantenerla al día**: después de cambiar un endpoint o un DTO, `dotnet build` regenera el archivo
   y el cambio se commitea junto con el código. El test `CommittedSpecFile_MatchesServedDocument`
-  compara el archivo con el documento servido. Como `dotnet test` también compila (y regenera),
+  compara cada archivo con su documento servido. Como `dotnet test` también compila (y regenera),
   para detectar un archivo sin commitear el job `build` del CI corre
-  `git diff --exit-code openapi/portal-api.json` después del build.
+  `git diff --exit-code openapi/` y `git status --porcelain openapi/` (este último detecta un
+  documento nuevo que nunca se commiteó) después del build.
 - **`servers`**: "Producción" usa `PROD_URL` (ver "Configuración") y "Local" es
   `http://localhost:5080`. Si se define `PROD_URL` durante el build, la URL también cambia en el
   archivo generado.
@@ -311,11 +372,12 @@ Corre en cada pull request y en cada push a `main`, en tres jobs encadenados con
 scripts que se ejecutan uno tras otro y frenan si uno falla):
 
 1. **`build`**: instala el SDK que pide `global.json`, y corre `dotnet format --verify-no-changes`,
-   `dotnet build`, `git diff --exit-code openapi/portal-api.json` (falla si el build cambió la spec
+   `dotnet build`, el chequeo de que `openapi/` no cambió (falla si el build cambió una spec
    y no se commiteó) y `dotnet test`.
 2. **`docker`**: arma la imagen, la levanta con un `JWT_SECRET` descartable (`openssl rand`),
    espera a que responda `/health` y prueba con `curl`: `/health` da 200, `/apis?q=clasico`
-   devuelve la Petstore API, cuya descripción dice "clásico" (prueba que la imagen tiene ICU), y `/dashboard/stats` sin token da 401
+   devuelve la Petstore API, cuya descripción dice "clásico" (prueba que la imagen tiene ICU),
+   `/v2/apis?pageSize=1` devuelve un ítem con `total` 3, y `/dashboard/stats` sin token da 401
    `unauthorized`. Al final muestra los logs del contenedor.
 3. **`deploy`**: solo en push a `main` y si los dos anteriores pasaron. Hace
    `curl -X POST "$RENDER_DEPLOY_HOOK"`, una URL secreta de Render que dispara un deploy. Si el
@@ -365,7 +427,8 @@ devportal-api/
 │   └── workflows/
 │       └── ci.yml                    # GitHub Actions: format, build, spec al día, tests, imagen Docker y deploy a Render
 ├── openapi/
-│   └── portal-api.json               # Spec OpenAPI generada por `dotnet build` (se versiona; la copia el portal)
+│   ├── portal-api.json               # Spec OpenAPI v1 generada por `dotnet build` (se versiona; la copia el portal)
+│   └── portal-api_v2.json            # Spec OpenAPI v2 (mismo mecanismo)
 ├── src/
 │   └── DevportalApi/                 # El proyecto web (la API)
 │       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos, UserSecretsId y generación de la spec
@@ -379,6 +442,7 @@ devportal-api/
 │       │   ├── schema.sql            # CREATE TABLE IF NOT EXISTS de las 4 tablas (recurso embebido)
 │       │   └── seed.sql              # Datos iniciales: el catálogo del portal, clientes y actividad (recurso embebido)
 │       ├── Endpoints/
+│       │   ├── PortalApiEndpoints.cs # MapPortalApi: monta todos los recursos en la raíz (v1) y en /v2 (v2)
 │       │   ├── HealthEndpoints.cs    # Un archivo por recurso, con sus rutas agrupadas con MapGroup
 │       │   ├── ApisEndpoints.cs      # GET /apis (búsqueda y filtro) y GET /apis/{id}
 │       │   ├── ClientsEndpoints.cs   # GET /clients
@@ -389,6 +453,7 @@ devportal-api/
 │       │   └── UsageEndpoints.cs     # GET /usage, protegido con la API key
 │       └── Infrastructure/
 │           ├── ApiErrors.cs          # Formato único de errores, su manejo global y `ProducesError` (documenta un error en la spec)
+│           ├── Paging.cs             # Paginación de la v2: valores por defecto, validación (400) y corte en memoria
 │           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h y scope opcional)
 │           ├── ApiKeyAuthentication.cs # Esquema de autenticación "ApiKey": valida el header X-API-Key y responde el 401
 │           ├── AuthPolicies.cs       # Policies de autorización: tokens de usuario, scope subscriptions:read y API key
@@ -410,6 +475,7 @@ devportal-api/
         ├── SubscriptionsTests.cs     # CRUD de suscripciones, 400/409/422, 404 con id ajeno o inválido y 401 sin token
         ├── UsageTests.cs             # GET /usage: 401 sin key, con key mala o con un JWT; 200 con la key demo
         ├── OAuthTests.cs             # POST /oauth/token (cuerpo y Basic, errores RFC 6749) y scopes: 200 en GET /subscriptions, 403 fuera de sus scopes
+        ├── V2Tests.cs                # Listados paginados de la v2 (por defecto, página pedida, filtro antes de paginar, 400) y v1 sin cambios
         └── OpenApiTests.cs           # Contenido de la spec (operationIds, security, enums, servers, tags) y archivo versionado igual al servido
 ```
 
@@ -475,6 +541,9 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | Primary constructor `class CorsTests(ApiFactory factory)` | Constructor con parameter properties (`constructor(private factory: ApiFactory)`) | `CorsTests.cs`, `HealthTests.cs`, `ErrorTests.cs` |
 | Collection expression `[]` | Un array literal `[]` | `?? []` en `Program.cs` |
 | `record` | Un `type` inmutable para datos | `HealthResponse`, `ErrorResponse`, `ApiDto` y `ClientDto` en `Contracts.cs` |
+| Record genérico `PagedResponse<T>` | `type PagedResponse<T> = { items: readonly T[]; page: number; pageSize: number; total: number }` | `Contracts.cs`, `Infrastructure/Paging.cs` |
+| `MapGroup("/v2")` | Un `express.Router()` montado con `app.use("/v2", router)` | `Endpoints/PortalApiEndpoints.cs` |
+| `enum PortalApiVersion { V1, V2 }` | Una unión de literales (`"v1" \| "v2"`) | `Endpoints/PortalApiEndpoints.cs` |
 | Inyección de dependencias (`builder.Services.Add…`) | Registrar dependencias en un contenedor en vez de importarlas a mano | `AddCors`, `AddOpenApi`, `AddSingleton(database)` en `Program.cs` |
 | Parámetros de un handler (`string? q`, `string id`, `Database database`) | `req.query.q`, `req.params.id` y un objeto importado, pero declarados como parámetros | `ListApisAsync` y `GetApiAsync` en `ApisEndpoints.cs` |
 | Dapper (`QueryAsync<T>`, `ExecuteAsync`) | Un cliente SQL liviano (`pg`, `better-sqlite3`) que además mapea filas a objetos | `Endpoints/ApisEndpoints.cs`, `Data/Database.cs` |
