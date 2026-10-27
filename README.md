@@ -5,7 +5,9 @@ del portal de desarrolladores hecho con Fumadocs. Expone recursos del mismo domi
 (catálogo de APIs, suscripciones, dashboard) y sirve su propia especificación OpenAPI.
 
 Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis/{id}`), clientes
-(`GET /clients`), base SQLite sembrada al arrancar, CORS, formato único de errores y documento OpenAPI.
+(`GET /clients`), token JWT (`POST /auth/token`), dashboard privado (`GET /dashboard/stats`,
+`GET /dashboard/activity`), base SQLite sembrada al arrancar, CORS, formato único de errores y
+documento OpenAPI con el esquema de seguridad `bearerAuth`.
 
 ## Requisitos
 
@@ -14,9 +16,17 @@ Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis
 
 ## Comandos
 
+Antes del primer `dotnet run`, una sola vez, se guarda el secreto con el que se firman los JWT
+(al menos 32 caracteres; sin él la API no arranca):
+
+```powershell
+dotnet user-secrets set JWT_SECRET "<un texto aleatorio de 32 caracteres o más>" --project src/DevportalApi
+```
+
 | Comando | Para qué |
 |---|---|
 | `dotnet run --project src/DevportalApi` | Levanta la API en `http://localhost:5080` |
+| `dotnet user-secrets list --project src/DevportalApi` | Muestra los secretos locales guardados |
 | `dotnet test` | Corre los tests de integración |
 | `dotnet build` | Compila la solución (los warnings cuentan como errores) |
 | `dotnet format` | Formatea el código según `.editorconfig` |
@@ -28,6 +38,17 @@ Con la API levantada:
 - `curl.exe "http://localhost:5080/apis?q=blog"` → solo la Blog API.
 - `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código.
 
+Para llamar a un endpoint privado, primero se pide un token con el usuario demo (en PowerShell 5.1
+conviene mandar el JSON desde un archivo, porque las comillas dentro de `-d` se pierden al pasar a
+`curl.exe`):
+
+```powershell
+'{"username":"demo","password":"demo1234"}' | Set-Content -NoNewline token-body.json
+$token = (curl.exe -s -X POST http://localhost:5080/auth/token -H "Content-Type: application/json" --data-binary "@token-body.json" | ConvertFrom-Json).accessToken
+curl.exe http://localhost:5080/dashboard/stats -H "Authorization: Bearer $token"
+Remove-Item token-body.json
+```
+
 ## Endpoints
 
 | Método y ruta | Qué hace |
@@ -36,6 +57,13 @@ Con la API levantada:
 | `GET /apis?q=&category=` | Catálogo. `q` busca en nombre, descripción y tags sin distinguir mayúsculas ni acentos (`autenticacion` encuentra "autenticación"); `category` filtra por categoría exacta sin distinguir mayúsculas. Ambos son opcionales y se combinan. |
 | `GET /apis/{id}` | Una API del catálogo; 404 `not_found` si el id no existe |
 | `GET /clients` | Los 8 clientes del portal, en el mismo orden |
+| `POST /auth/token` | Recibe `{ "username", "password" }`. Con el usuario demo (`demo` / `demo1234`, públicos a propósito) devuelve `{ accessToken, tokenType: "Bearer", expiresIn: 3600 }`; si no, 401 `invalid_credentials` |
+| `GET /dashboard/stats` | **Privado.** Las 4 métricas del dashboard del portal (valores fijos en el código) |
+| `GET /dashboard/activity?status=` | **Privado.** Actividad reciente; `status` (opcional) filtra por `success`, `error` o `pending`; otro valor da 400 `validation_error` |
+
+Los endpoints privados exigen el header `Authorization: Bearer <accessToken>`. El token es un JWT
+HS256 firmado con `JWT_SECRET`, con emisor `devportal-api`, audiencia `devportal-portal`, `sub` = el
+usuario y vencimiento a la hora (sin tolerancia: vencido es vencido).
 
 ## Base de datos
 
@@ -44,8 +72,9 @@ si falta, corre `Data/schema.sql` (crea las tablas si no existen) y, si la tabla
 corre `Data/seed.sql`. Arrancar de nuevo no duplica datos. Para volver a los datos iniciales en
 local alcanza con borrar el archivo de la base.
 
-Tablas: `apis`, `clients`, `activity` (la usará el dashboard) y `subscriptions` (vacía; la usarán
-las suscripciones). Los datos del seed se copiaron a mano de los mocks del portal
+Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subscriptions` (vacía;
+la usarán las suscripciones). Las métricas de `GET /dashboard/stats` no están en la base: son una
+constante en `Endpoints/DashboardEndpoints.cs`. Los datos del seed se copiaron a mano de los mocks del portal
 (`fumadocs-api-portal/src/data/`). Los tags se guardan como texto JSON en `apis.tags_json`.
 
 ## Configuración
@@ -57,6 +86,7 @@ variable de entorno pisa al archivo.
 |---|---|---|
 | `ALLOWED_ORIGINS` | Orígenes permitidos por CORS, separados por comas | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
 | `DB_PATH` | Archivo de la base SQLite; si es relativo, se resuelve contra la carpeta del proyecto (content root) | `db/portal.db` |
+| `JWT_SECRET` | Clave para firmar y validar los JWT (HS256). Obligatoria y de al menos 32 bytes: si falta o es corta, la API no arranca y el error lo explica | Ninguno: en local va en user-secrets (ver "Comandos"); en Render, como variable de entorno |
 
 Con `dotnet run`, la base por defecto queda en `src/DevportalApi/db/portal.db`, carpeta ignorada
 por git (`db/` en `.gitignore`).
@@ -64,7 +94,10 @@ por git (`db/` en `.gitignore`).
 En Render, `ALLOWED_ORIGINS` debe definirse como variable de entorno: los valores por defecto de
 `appsettings.json` incluyen orígenes `localhost`.
 
-Ningún secreto se guarda en el repo.
+Ningún secreto se guarda en el repo. `dotnet user-secrets` guarda `JWT_SECRET` en un archivo del
+perfil del usuario (`%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json`), fuera del
+repo; el `<UserSecretsId>` del `.csproj` solo dice qué carpeta usar. ASP.NET lo carga solo en el
+entorno `Development` (el de `dotnet run` y el de los tests).
 
 ## Formato de errores
 
@@ -78,6 +111,9 @@ Todas las respuestas de error usan el mismo cuerpo, con mensajes en español:
 |---|---|---|
 | Ruta inexistente | 404 | `not_found` |
 | Recurso inexistente (por ejemplo, `GET /apis/nope`); el mensaje incluye el id | 404 | `not_found` |
+| Parámetro inválido (por ejemplo, `GET /dashboard/activity?status=otro`) o cuerpo JSON vacío o mal formado (en `Development` ASP.NET lo lanza como `BadHttpRequestException` y `ApiErrors.cs` lo convierte en 400) | 400 | `validation_error` |
+| Usuario o contraseña incorrectos en `POST /auth/token` | 401 | `invalid_credentials` |
+| Endpoint privado sin token, con otro esquema (`Basic …`), con firma inválida, de otra audiencia o vencido; además lleva el header `WWW-Authenticate: Bearer` | 401 | `unauthorized` |
 | Método no permitido en una ruta existente | 405 | `method_not_allowed` |
 | Excepción no controlada (sin detalles internos ni stack) | 500 | `internal_error` |
 | Otro status de error sin cuerpo | 4xx/5xx | `http_error` |
@@ -92,9 +128,9 @@ devportal-api/
 ├── .gitignore                        # Incluye bin/, obj/ y los archivos *.db (base SQLite local)
 ├── src/
 │   └── DevportalApi/                 # El proyecto web (la API)
-│       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet y recursos embebidos
-│       ├── Program.cs                # Punto de entrada: registra servicios, inicializa la base, arma el pipeline y mapea endpoints
-│       ├── Contracts.cs              # DTOs (records) que devuelven los endpoints: ApiDto, ClientDto
+│       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos y UserSecretsId
+│       ├── Program.cs                # Punto de entrada: registra servicios (CORS, OpenAPI, JWT), inicializa la base, arma el pipeline y mapea endpoints
+│       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto
 │       ├── appsettings.json          # Configuración por defecto (se puede pisar con variables de entorno)
 │       ├── Properties/
 │       │   └── launchSettings.json   # Perfil de `dotnet run` en local: puerto 5080 y entorno Development
@@ -105,19 +141,26 @@ devportal-api/
 │       ├── Endpoints/
 │       │   ├── HealthEndpoints.cs    # Un archivo por recurso, con sus rutas agrupadas con MapGroup
 │       │   ├── ApisEndpoints.cs      # GET /apis (búsqueda y filtro) y GET /apis/{id}
-│       │   └── ClientsEndpoints.cs   # GET /clients
+│       │   ├── ClientsEndpoints.cs   # GET /clients
+│       │   ├── AuthEndpoints.cs      # POST /auth/token (usuario demo → JWT)
+│       │   └── DashboardEndpoints.cs # GET /dashboard/stats y /dashboard/activity (grupo con RequireAuthorization)
 │       └── Infrastructure/
-│           └── ApiErrors.cs          # Formato único de errores y su manejo global
+│           ├── ApiErrors.cs          # Formato único de errores y su manejo global
+│           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h)
+│           └── OpenApiSecurity.cs    # Transformers de OpenAPI: esquema bearerAuth y security + 401 en los endpoints privados
 └── tests/
     └── DevportalApi.Tests/           # Proyecto de tests (xUnit)
         ├── DevportalApi.Tests.csproj
         ├── ApiFactory.cs             # Levanta la API en memoria con configuración de test y una base temporal propia
+        ├── TestTokens.cs             # Crea y valida JWT de prueba con el secreto de test (vencidos, de otra audiencia, mal firmados)
         ├── HealthTests.cs            # GET /health y documento OpenAPI
         ├── ErrorTests.cs             # 404, 405 y 500 con el formato de error
-        ├── CorsTests.cs              # Preflight desde orígenes permitidos y no permitidos
+        ├── CorsTests.cs              # Preflight (también a un endpoint privado) y header CORS en respuestas 404 y 401
         ├── DatabaseTests.cs          # Creación y seed de la base, sin duplicar al arrancar dos veces
         ├── ApisTests.cs              # Catálogo: listado, búsqueda, filtro por categoría y 404
-        └── ClientsTests.cs           # Clientes en el orden del portal
+        ├── ClientsTests.cs           # Clientes en el orden del portal
+        ├── AuthTests.cs              # Token con credenciales demo, credenciales malas, cuerpo mal formado y JWT_SECRET faltante o corto
+        └── DashboardTests.cs         # 401 en cada caso de token inválido, stats, filtro de actividad, 400 y security en OpenAPI
 ```
 
 Recursos embebidos: `schema.sql` y `seed.sql` se compilan dentro de la DLL (`<EmbeddedResource>` en
@@ -142,8 +185,20 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
    ejemplo, ninguna ruta coincidió), escribe el cuerpo de error con el formato único.
 3. **CORS** (`app.UseCors()`): responde los preflight `OPTIONS` y agrega los headers
    `Access-Control-*` solo para los orígenes de `ALLOWED_ORIGINS`.
-4. **Endpoint**: ASP.NET llama a la función del endpoint y le pasa sus parámetros: los de la ruta
-   (`{id}`), los de la query string (`q`, `category`) y los servicios registrados (`Database`).
+4. **Autenticación** (`app.UseAuthentication()`): responde "¿quién sos?". Si viene
+   `Authorization: Bearer <token>`, JwtBearer valida firma, emisor, audiencia y vencimiento según
+   los `TokenValidationParameters` de `Program.cs`, y deja el usuario en `HttpContext.User`. No
+   rechaza nada: un request sin token sigue como anónimo.
+5. **Autorización** (`app.UseAuthorization()`): responde "¿puede pasar?". Si el endpoint pide
+   autorización (`RequireAuthorization()` en el grupo `/dashboard`) y el usuario es anónimo, corta
+   con un *challenge*: el evento `OnChallenge` de `Program.cs` escribe el 401 `unauthorized` con el
+   formato único y el header `WWW-Authenticate: Bearer`.
+   Estos dos middlewares van explícitos y después de `UseCors()`: si no se llaman, ASP.NET los
+   agrega solo, pero **antes** de CORS, y los 401 salen sin `Access-Control-Allow-Origin` (el
+   navegador no dejaría al portal leer el error). Lo cubre un test de `CorsTests.cs`.
+6. **Endpoint**: ASP.NET llama a la función del endpoint y le pasa sus parámetros: los de la ruta
+   (`{id}`), los de la query string (`q`, `category`), el cuerpo JSON (`TokenRequest`) y los
+   servicios registrados (`Database`, `Tokens`).
    Por ejemplo, la de `GET /apis` en `Endpoints/ApisEndpoints.cs`:
    1. **Dapper → SQLite**: abre una conexión, ejecuta el `SELECT` escrito a mano y Dapper convierte
       cada fila en un objeto C#.
@@ -178,6 +233,13 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | Lambdas `x => …` | Arrow functions | Endpoints y configuración |
 | `switch` expression | Un objeto mapa o un `switch` que devuelve valor | `FromStatusCode` en `ApiErrors.cs` |
 | `appsettings.json` + variables de entorno | `.env` + `process.env` | `ALLOWED_ORIGINS` |
+| `dotnet user-secrets` | Un `.env.local` que nunca se commitea, pero guardado fuera del repo | `JWT_SECRET` (ver "Comandos" y "Configuración") |
+| Autenticación + autorización (`UseAuthentication`, `UseAuthorization`) | Un middleware tipo `passport.authenticate('jwt')` que llena `req.user`, más un guard que corta con 401 | `Program.cs` |
+| `AddJwtBearer` + `TokenValidationParameters` | `jwt.verify(token, secret, { issuer, audience, algorithms })` de `jsonwebtoken` | `Program.cs` |
+| `RequireAuthorization()` en un `MapGroup` | Montar un router de Express detrás del middleware de auth (`router.use(requireAuth)`) | `DashboardEndpoints.cs` |
+| `ClaimsPrincipal` / claims | El payload decodificado del JWT (`{ sub, aud, exp, … }`) | `HttpContext.User`; `sub` se crea en `Tokens.cs` |
+| Validación explícita de un parámetro | Un `if (!['success', 'error', 'pending'].includes(status))` que responde 400 | `ListActivityAsync` en `DashboardEndpoints.cs` |
+| Transformers de OpenAPI (documento y operación) | Un plugin que post-procesa el objeto de la spec antes de servirla | `Infrastructure/OpenApiSecurity.cs` |
 | xUnit + `WebApplicationFactory` | Vitest + supertest | `tests/DevportalApi.Tests` |
 
 Notas:
@@ -202,7 +264,7 @@ Notas:
   hace falta declararla.
 - **Tests de integración**: `ApiFactory` levanta la API real en memoria (sin abrir un puerto) y le
   pasa configuración de test (`ALLOWED_ORIGINS`, una base temporal en `DB_PATH` y un `JWT_SECRET`
-  de prueba, que usarán las próximas funcionalidades). Cada clase de tests la recibe con
+  de prueba, con el que `TestTokens.cs` también fabrica tokens vencidos o de otra audiencia). Cada clase de tests la recibe con
   `IClassFixture<ApiFactory>`, parecido a un `beforeAll` compartido, así que cada clase tiene su
   propia base. Al terminar, `ApiFactory` llama a `SqliteConnection.ClearAllPools()` antes de borrar
   el archivo: Microsoft.Data.Sqlite reutiliza conexiones (pool) y en Windows una conexión abierta
@@ -229,3 +291,24 @@ Notas:
   acentos. El Dockerfile debe usar una imagen `aspnet` completa (no chiseled ni Alpine).
 - **Filtros opcionales**: `string? q` vale `null` si el parámetro no viene. Los endpoints tratan
   igual `null`, vacío y espacios (`string.IsNullOrWhiteSpace`), así `?q=` devuelve todo.
+- **JWT de punta a punta**: `Tokens.cs` arma el token con `JsonWebTokenHandler.CreateToken` (claims
+  `iss`, `aud`, `sub`, `exp`) y lo firma con HS256 usando `JWT_SECRET`; JwtBearer lo valida en cada
+  request con los `TokenValidationParameters` de `Program.cs`. `ValidAlgorithms` acepta solo HS256
+  y `ClockSkew = TimeSpan.Zero` saca los 5 minutos de tolerancia que JwtBearer da por defecto.
+  `MapInboundClaims = false` deja los claims con su nombre del JWT (`sub`); sin eso, .NET los
+  renombra a URIs largas (`http://schemas.xmlsoap.org/.../nameidentifier`).
+- **Claims**: dentro de un endpoint privado, `HttpContext.User` (un `ClaimsPrincipal`) es el
+  payload validado del token; `user.FindFirst("sub")?.Value` sería el `payload.sub` de TypeScript.
+- **401 con el formato único**: JwtBearer, por defecto, responde 401 sin cuerpo y solo con
+  `WWW-Authenticate`. `OnChallenge` llama a `context.HandleResponse()` (le dice a JwtBearer "ya
+  respondo yo"), vuelve a poner `WWW-Authenticate: Bearer` y escribe el cuerpo con `ApiErrors.Problem`.
+- **Fallar al arrancar**: `new Tokens(builder.Configuration["JWT_SECRET"])` se ejecuta antes de
+  `builder.Build()`; si el secreto falta o tiene menos de 32 bytes lanza una excepción y la API no
+  levanta, en vez de firmar tokens con una clave vacía o débil.
+- **`status` como texto**: se valida con un `if` y no con un `enum` de C#, porque un `enum` mal
+  enviado lo rechaza ASP.NET antes de llegar al endpoint, y esa respuesta no sería el 400
+  `validation_error` del formato único.
+- **Transformers de OpenAPI**: `AddDocumentTransformer` corre una vez sobre todo el documento
+  (registra `components.securitySchemes.bearerAuth`) y `AddOperationTransformer` corre por cada
+  endpoint: si su metadata tiene `IAuthorizeData` (lo agrega `RequireAuthorization()`), le suma
+  `security: [{ bearerAuth: [] }]` y la respuesta 401.

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Diagnostics;
+
 namespace DevportalApi.Infrastructure;
 
 public sealed record ErrorDetail(string Code, string Message);
@@ -13,8 +15,14 @@ public static class ApiErrors
     public static WebApplication UseApiErrors(this WebApplication app)
     {
         app.UseExceptionHandler(errorApp => errorApp.Run(context =>
-            Problem(StatusCodes.Status500InternalServerError, "internal_error", "Ocurrió un error inesperado.")
-                .ExecuteAsync(context)));
+        {
+            // In Development, ASP.NET throws BadHttpRequestException for an unreadable body or parameter.
+            var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+            var result = error is BadHttpRequestException badRequest
+                ? FromStatusCode(badRequest.StatusCode)
+                : Problem(StatusCodes.Status500InternalServerError, "internal_error", "Ocurrió un error inesperado.");
+            return result.ExecuteAsync(context);
+        }));
 
         // Runs only for 4xx/5xx responses that have no body yet (e.g. no route matched).
         app.UseStatusCodePages(statusContext =>
@@ -28,6 +36,7 @@ public static class ApiErrors
 
     private static IResult FromStatusCode(int status) => status switch
     {
+        StatusCodes.Status400BadRequest => Problem(status, "validation_error", "La solicitud tiene un cuerpo o parámetros con formato inválido."),
         StatusCodes.Status404NotFound => Problem(status, "not_found", "El recurso solicitado no existe."),
         StatusCodes.Status405MethodNotAllowed => Problem(status, "method_not_allowed", "El método HTTP no está permitido para este recurso."),
         _ => Problem(status, "http_error", "La solicitud no pudo completarse."),

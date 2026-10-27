@@ -8,6 +8,7 @@ namespace DevportalApi.Tests;
 public class ApiFactory : WebApplicationFactory<Program>
 {
     public const string AllowedOrigin = "https://agustintamb.github.io";
+    public const string JwtSecret = "test-only-jwt-secret-with-at-least-32-bytes";
 
     // Each factory (one per test class) gets its own SQLite file, seeded on startup.
     public string DbPath { get; } = Path.Combine(Path.GetTempPath(), $"devportal-api-tests-{Guid.NewGuid():N}.db");
@@ -15,7 +16,7 @@ public class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("DB_PATH", DbPath);
-        builder.UseSetting("JWT_SECRET", "test-only-jwt-secret-with-at-least-32-bytes");
+        builder.UseSetting("JWT_SECRET", JwtSecret);
         builder.UseSetting("ALLOWED_ORIGINS", $"http://localhost:3000,http://localhost:3100,{AllowedOrigin}");
     }
 
