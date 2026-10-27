@@ -8,7 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.89" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compiles the SQL scripts into the DLL; LogicalName keeps the resource name as just the file name. -->
+    <EmbeddedResource Include="Data\*.sql" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

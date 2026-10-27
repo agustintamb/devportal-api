@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 
 namespace DevportalApi.Tests;
 
@@ -8,11 +9,12 @@ public class ApiFactory : WebApplicationFactory<Program>
 {
     public const string AllowedOrigin = "https://agustintamb.github.io";
 
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"devportal-api-tests-{Guid.NewGuid():N}.db");
+    // Each factory (one per test class) gets its own SQLite file, seeded on startup.
+    public string DbPath { get; } = Path.Combine(Path.GetTempPath(), $"devportal-api-tests-{Guid.NewGuid():N}.db");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("DB_PATH", _dbPath);
+        builder.UseSetting("DB_PATH", DbPath);
         builder.UseSetting("JWT_SECRET", "test-only-jwt-secret-with-at-least-32-bytes");
         builder.UseSetting("ALLOWED_ORIGINS", $"http://localhost:3000,http://localhost:3100,{AllowedOrigin}");
     }
@@ -20,9 +22,14 @@ public class ApiFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (File.Exists(_dbPath))
+        // Pooled connections keep the file locked on Windows; release them before deleting.
+        SqliteConnection.ClearAllPools();
+        foreach (var file in new[] { DbPath, $"{DbPath}-wal", $"{DbPath}-shm" })
         {
-            File.Delete(_dbPath);
+            if (File.Exists(file))
+            {
+                File.Delete(file);
+            }
         }
     }
 }
