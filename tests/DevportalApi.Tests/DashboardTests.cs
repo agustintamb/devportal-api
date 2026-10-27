@@ -46,7 +46,8 @@ public class DashboardTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal("Solicitudes totales", stats[0].GetProperty("label").GetString());
         Assert.Equal("1.284", stats[0].GetProperty("value").GetString());
         Assert.Equal("+12 % esta semana", stats[0].GetProperty("detail").GetString());
-        Assert.Equal("Petstore · Blog · Auth", stats[2].GetProperty("detail").GetString());
+        Assert.Equal("APIs integradas", stats[2].GetProperty("label").GetString());
+        Assert.Equal("Portal · Petstore · PokeAPI", stats[2].GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -55,10 +56,19 @@ public class DashboardTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var activity = await GetArrayAsync("/dashboard/activity", TestTokens.Create());
 
         Assert.Equal([1, 2, 3, 4, 5], activity.Select(item => item.GetProperty("id").GetInt32()));
-        Assert.Equal("GET /api/pets", activity[0].GetProperty("action").GetString());
-        Assert.Equal("Petstore", activity[0].GetProperty("api").GetString());
-        Assert.Equal("hace 2 min", activity[0].GetProperty("time").GetString());
-        Assert.Equal("success", activity[0].GetProperty("status").GetString());
+        Assert.Equal(
+            [
+                ("GET /api/v2/pokemon/pikachu", "PokeAPI", "hace 2 min", "success"),
+                ("POST /auth/token", "Portal API", "hace 5 min", "success"),
+                ("POST /pet", "Petstore", "hace 12 min", "success"),
+                ("DELETE /pet/5", "Petstore", "hace 1 h", "error"),
+                ("GET /v2/apis", "Portal API", "hace 2 h", "pending"),
+            ],
+            activity.Select(item => (
+                item.GetProperty("action").GetString(),
+                item.GetProperty("api").GetString(),
+                item.GetProperty("time").GetString(),
+                item.GetProperty("status").GetString())));
     }
 
     [Theory]

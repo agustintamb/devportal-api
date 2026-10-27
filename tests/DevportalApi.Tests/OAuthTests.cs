@@ -102,14 +102,14 @@ public class OAuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task ClientToken_ListsTheDemoUserSubscriptions()
     {
         var created = await SendAsync(
-            HttpMethod.Post, "/subscriptions", TestTokens.Create(), """{ "apiId": "blog", "plan": "free" }""");
+            HttpMethod.Post, "/subscriptions", TestTokens.Create(), """{ "apiId": "pokeapi", "plan": "free" }""");
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
         var response = await SendAsync(HttpMethod.Get, "/subscriptions", await IssueClientTokenAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var list = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Contains("blog", list.EnumerateArray().Select(item => item.GetProperty("apiId").GetString()));
+        Assert.Contains("pokeapi", list.EnumerateArray().Select(item => item.GetProperty("apiId").GetString()));
     }
 
     [Fact]

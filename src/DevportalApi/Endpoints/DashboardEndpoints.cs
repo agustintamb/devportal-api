@@ -12,7 +12,7 @@ public static class DashboardEndpoints
     [
         new("Solicitudes totales", "1.284", "+12 % esta semana"),
         new("Tasa de éxito", "97,3 %", "+0,5 % frente a la semana pasada"),
-        new("APIs integradas", "3", "Petstore · Blog · Auth"),
+        new("APIs integradas", "3", "Portal · Petstore · PokeAPI"),
         new("Latencia promedio", "84 ms", "p95: 210 ms"),
     ];
 

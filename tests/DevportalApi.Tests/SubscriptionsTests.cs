@@ -17,12 +17,12 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var user = NewUser();
         var before = DateTimeOffset.UtcNow;
 
-        var response = await SendAsync(HttpMethod.Post, "/subscriptions", user, """{ "apiId": "blog", "plan": "free" }""");
+        var response = await SendAsync(HttpMethod.Post, "/subscriptions", user, """{ "apiId": "pokeapi", "plan": "free" }""");
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<JsonElement>();
         var id = Guid.Parse(created.GetProperty("id").GetString()!);
-        Assert.Equal("blog", created.GetProperty("apiId").GetString());
+        Assert.Equal("pokeapi", created.GetProperty("apiId").GetString());
         Assert.Equal("free", created.GetProperty("plan").GetString());
         var createdAt = created.GetProperty("createdAt").GetDateTimeOffset();
         Assert.Equal(TimeSpan.Zero, createdAt.Offset);
@@ -41,12 +41,12 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var owner = NewUser();
         var other = NewUser();
         await CreateAsync(owner, "petstore", "free");
-        await CreateAsync(owner, "auth", "pro");
-        await CreateAsync(other, "blog", "free");
+        await CreateAsync(owner, "portal", "pro");
+        await CreateAsync(other, "pokeapi", "free");
 
         var list = await GetJsonAsync("/subscriptions", owner);
 
-        Assert.Equal(["petstore", "auth"], list.EnumerateArray().Select(item => item.GetProperty("apiId").GetString()));
+        Assert.Equal(["petstore", "portal"], list.EnumerateArray().Select(item => item.GetProperty("apiId").GetString()));
     }
 
     [Fact]
@@ -61,10 +61,10 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task Create_SameApiTwice_ReturnsConflictButOtherUserCanSubscribe()
     {
         var user = NewUser();
-        await CreateAsync(user, "blog", "free");
+        await CreateAsync(user, "pokeapi", "free");
 
-        var repeated = await SendAsync(HttpMethod.Post, "/subscriptions", user, """{ "apiId": "blog", "plan": "pro" }""");
-        var otherUser = await SendAsync(HttpMethod.Post, "/subscriptions", NewUser(), """{ "apiId": "blog", "plan": "pro" }""");
+        var repeated = await SendAsync(HttpMethod.Post, "/subscriptions", user, """{ "apiId": "pokeapi", "plan": "pro" }""");
+        var otherUser = await SendAsync(HttpMethod.Post, "/subscriptions", NewUser(), """{ "apiId": "pokeapi", "plan": "pro" }""");
 
         await AssertErrorAsync(repeated, HttpStatusCode.Conflict, "already_subscribed");
         Assert.Equal(HttpStatusCode.Created, otherUser.StatusCode);
@@ -74,9 +74,9 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Theory]
     [InlineData("""{ "plan": "free" }""")]
     [InlineData("""{ "apiId": "", "plan": "free" }""")]
-    [InlineData("""{ "apiId": "blog" }""")]
-    [InlineData("""{ "apiId": "blog", "plan": "Free" }""")]
-    [InlineData("""{ "apiId": "blog", "plan": "enterprise" }""")]
+    [InlineData("""{ "apiId": "pokeapi" }""")]
+    [InlineData("""{ "apiId": "pokeapi", "plan": "Free" }""")]
+    [InlineData("""{ "apiId": "pokeapi", "plan": "enterprise" }""")]
     [InlineData("""{ "apiId": "nope", "plan": "gold" }""")]
     [InlineData("""{ "apiId": 1, "plan": "free" }""")]
     public async Task Create_InvalidBody_ReturnsValidationError(string body)
@@ -93,7 +93,7 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task Patch_ChangesPlan()
     {
         var user = NewUser();
-        var created = await CreateAsync(user, "auth", "free");
+        var created = await CreateAsync(user, "portal", "free");
         var id = created.GetProperty("id").GetString();
 
         var response = await SendAsync(HttpMethod.Patch, $"/subscriptions/{id}", user, """{ "plan": "pro" }""");
@@ -102,7 +102,7 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var updated = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("pro", updated.GetProperty("plan").GetString());
         Assert.Equal(id, updated.GetProperty("id").GetString());
-        Assert.Equal("auth", updated.GetProperty("apiId").GetString());
+        Assert.Equal("portal", updated.GetProperty("apiId").GetString());
         Assert.Equal(created.GetProperty("createdAt").GetString(), updated.GetProperty("createdAt").GetString());
         Assert.Equal(updated.GetRawText(), (await GetJsonAsync($"/subscriptions/{id}", user)).GetRawText());
     }
@@ -114,7 +114,7 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task Patch_InvalidPlan_ReturnsValidationErrorAndKeepsPlan(string body)
     {
         var user = NewUser();
-        var id = (await CreateAsync(user, "auth", "free")).GetProperty("id").GetString();
+        var id = (await CreateAsync(user, "portal", "free")).GetProperty("id").GetString();
 
         var response = await SendAsync(HttpMethod.Patch, $"/subscriptions/{id}", user, body);
 
@@ -142,7 +142,7 @@ public class SubscriptionsTests(ApiFactory factory) : IClassFixture<ApiFactory>
     {
         var owner = NewUser();
         var intruder = NewUser();
-        var created = await CreateAsync(owner, "blog", "free");
+        var created = await CreateAsync(owner, "pokeapi", "free");
         var url = $"/subscriptions/{created.GetProperty("id").GetString()}";
 
         var get = await SendAsync(HttpMethod.Get, url, intruder);

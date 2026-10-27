@@ -1,15 +1,15 @@
--- Copied by hand from the portal mocks (fumadocs-api-portal/src/data). Runs only when apis is empty.
+-- Same catalog as the portal (fumadocs-api-portal/src/data/apis.ts), in the same order. Runs only when apis is empty.
 
-INSERT INTO apis (id, name, description, status, category, tags_json, version) VALUES
+INSERT INTO apis (id, name, description, status, visibility, category, tags_json, version) VALUES
+  ('portal', 'Portal API',
+   'API propia del portal: catálogo de APIs, clientes, métricas del dashboard y suscripciones. Emite tokens JWT con un usuario demo para probar los endpoints privados.',
+   'beta', 'internal', 'Plataforma', '["dashboard","subscriptions","jwt"]', 'v1 / v2'),
   ('petstore', 'Petstore API',
-   'El clásico ejemplo Swagger Petstore. Operaciones CRUD de mascotas, inventario de la tienda y gestión de usuarios.',
-   'stable', 'Ejemplo', '["pets","store","users"]', 'v1.0.19'),
-  ('blog', 'Blog API',
-   'Gestión de posts, comentarios y perfiles de autores. Permite paginar y filtrar por tag o autor. Versionada: v1 y v2 disponibles.',
-   'stable', 'Contenido', '["posts","comments","authors"]', 'v1 / v2'),
-  ('auth', 'Auth API',
-   'Servicio de autenticación con JWT. Registro, login, renovación de token, recuperación de contraseña y gestión del perfil.',
-   'stable', 'Seguridad', '["jwt","oauth","users"]', 'v2.0.0');
+   'El clásico ejemplo de Swagger contra su servidor público: mascotas, tienda y usuarios, con escritura real (POST, PUT, DELETE) y sin credenciales. Versiones v2 y v3.',
+   'stable', 'public', 'Ejemplo', '["pets","store","users"]', 'v2 / v3'),
+  ('pokeapi', 'PokeAPI',
+   'Datos de Pokémon, movimientos, ítems y juegos desde la API pública PokeAPI. Solo lectura y sin credenciales.',
+   'stable', 'public', 'Datos abiertos', '["pokemon","juegos","items"]', 'v2.10.0');
 
 INSERT INTO clients (slug, name, position) VALUES
   ('google', 'Google', 1),
@@ -21,9 +21,10 @@ INSERT INTO clients (slug, name, position) VALUES
   ('shopify', 'Shopify', 7),
   ('github', 'GitHub', 8);
 
+-- The dashboard stays hardcoded (as in the portal's src/data/dashboard.ts), naming the catalog APIs.
 INSERT INTO activity (id, action, api, time, status) VALUES
-  (1, 'GET /api/pets', 'Petstore', 'hace 2 min', 'success'),
-  (2, 'POST /auth/login', 'Auth API', 'hace 5 min', 'success'),
-  (3, 'GET /blog-api/posts', 'Blog API', 'hace 12 min', 'success'),
-  (4, 'DELETE /api/pet/5', 'Petstore', 'hace 1 h', 'error'),
-  (5, 'POST /blog-api/posts', 'Blog API', 'hace 2 h', 'pending');
+  (1, 'GET /api/v2/pokemon/pikachu', 'PokeAPI', 'hace 2 min', 'success'),
+  (2, 'POST /auth/token', 'Portal API', 'hace 5 min', 'success'),
+  (3, 'POST /pet', 'Petstore', 'hace 12 min', 'success'),
+  (4, 'DELETE /pet/5', 'Petstore', 'hace 1 h', 'error'),
+  (5, 'GET /v2/apis', 'Portal API', 'hace 2 h', 'pending');

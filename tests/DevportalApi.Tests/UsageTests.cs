@@ -43,7 +43,7 @@ public class UsageTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var usage = await response.Content.ReadFromJsonAsync<JsonElement>();
         var byApi = usage.GetProperty("byApi").EnumerateArray().ToList();
-        Assert.Equal(["petstore", "blog", "auth"], byApi.Select(item => item.GetProperty("apiId").GetString()));
+        Assert.Equal(["portal", "petstore", "pokeapi"], byApi.Select(item => item.GetProperty("apiId").GetString()));
         Assert.Equal(usage.GetProperty("requestsThisMonth").GetInt32(), byApi.Sum(item => item.GetProperty("requests").GetInt32()));
         Assert.True(usage.GetProperty("monthlyLimit").GetInt32() > 0);
     }

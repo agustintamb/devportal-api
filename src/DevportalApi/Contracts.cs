@@ -8,6 +8,7 @@ public sealed record ApiDto(
     string Name,
     string Description,
     string Status,
+    string Visibility,
     string Category,
     IReadOnlyList<string> Tags,
     string Version);

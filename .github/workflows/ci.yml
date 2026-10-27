@@ -61,9 +61,9 @@ jobs:
           set -euo pipefail
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)" = 200
 
-          # "autenticacion" (no accent) only matches the Auth API if the image has ICU.
-          curl -fsS "http://localhost:8080/apis?q=autenticacion" | tee apis.json
-          jq -e 'length > 0 and any(.[]; .id == "auth")' apis.json
+          # "clasico" (no accent) only matches the Petstore API ("clásico") if the image has ICU.
+          curl -fsS "http://localhost:8080/apis?q=clasico" | tee apis.json
+          jq -e 'length > 0 and any(.[]; .id == "petstore")' apis.json
 
           status=$(curl -s -o stats.json -w '%{http_code}' http://localhost:8080/dashboard/stats)
           cat stats.json

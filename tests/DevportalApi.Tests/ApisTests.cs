@@ -13,30 +13,30 @@ public class ApisTests(ApiFactory factory) : IClassFixture<ApiFactory>
     {
         var apis = await GetApisAsync("/apis");
 
-        Assert.Equal(["petstore", "blog", "auth"], Ids(apis));
+        Assert.Equal(["portal", "petstore", "pokeapi"], Ids(apis));
     }
 
     [Fact]
     public async Task GetApis_ReturnsApiFields()
     {
-        var blog = (await GetApisAsync("/apis")).Single(api => api.GetProperty("id").GetString() == "blog");
+        var pokeapi = (await GetApisAsync("/apis")).Single(api => api.GetProperty("id").GetString() == "pokeapi");
 
-        Assert.Equal("Blog API", blog.GetProperty("name").GetString());
-        Assert.StartsWith("Gestión de posts", blog.GetProperty("description").GetString());
-        Assert.Equal("stable", blog.GetProperty("status").GetString());
-        Assert.Equal("Contenido", blog.GetProperty("category").GetString());
-        Assert.Equal(["posts", "comments", "authors"], blog.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()));
-        Assert.Equal("v1 / v2", blog.GetProperty("version").GetString());
+        Assert.Equal("PokeAPI", pokeapi.GetProperty("name").GetString());
+        Assert.StartsWith("Datos de Pokémon", pokeapi.GetProperty("description").GetString());
+        Assert.Equal("stable", pokeapi.GetProperty("status").GetString());
+        Assert.Equal("public", pokeapi.GetProperty("visibility").GetString());
+        Assert.Equal("Datos abiertos", pokeapi.GetProperty("category").GetString());
+        Assert.Equal(["pokemon", "juegos", "items"], pokeapi.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()));
+        Assert.Equal("v2.10.0", pokeapi.GetProperty("version").GetString());
     }
 
     [Theory]
-    [InlineData("blog", "blog")]
-    [InlineData("BLOG", "blog")]
-    [InlineData("auth", "blog,auth")]
-    [InlineData("paginar", "blog")]
-    [InlineData("AUTENTICACION", "auth")]
-    [InlineData("comments", "blog")]
-    [InlineData("users", "petstore,auth")]
+    [InlineData("pokemon", "pokeapi")]
+    [InlineData("POKEMON", "pokeapi")]
+    [InlineData("mascotas", "petstore")]
+    [InlineData("clasico", "petstore")]
+    [InlineData("suscripciones", "portal")]
+    [InlineData("users", "petstore")]
     [InlineData("graphql", "")]
     public async Task GetApis_WithQuery_FiltersByNameDescriptionAndTagsIgnoringCaseAndAccents(string query, string expectedIds)
     {
@@ -46,13 +46,13 @@ public class ApisTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Theory]
-    [InlineData("Seguridad")]
-    [InlineData("seguridad")]
+    [InlineData("Datos abiertos")]
+    [InlineData("datos abiertos")]
     public async Task GetApis_WithCategory_FiltersByExactCategoryIgnoringCase(string category)
     {
-        var apis = await GetApisAsync($"/apis?category={category}");
+        var apis = await GetApisAsync($"/apis?category={Uri.EscapeDataString(category)}");
 
-        Assert.Equal(["auth"], Ids(apis));
+        Assert.Equal(["pokeapi"], Ids(apis));
     }
 
     [Fact]
@@ -74,14 +74,16 @@ public class ApisTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task GetApiById_ReturnsApi()
     {
-        var response = await _client.GetAsync("/apis/auth");
+        var response = await _client.GetAsync("/apis/portal");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var api = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("auth", api.GetProperty("id").GetString());
-        Assert.Equal("Auth API", api.GetProperty("name").GetString());
-        Assert.Equal("Seguridad", api.GetProperty("category").GetString());
-        Assert.Equal("v2.0.0", api.GetProperty("version").GetString());
+        Assert.Equal("portal", api.GetProperty("id").GetString());
+        Assert.Equal("Portal API", api.GetProperty("name").GetString());
+        Assert.Equal("beta", api.GetProperty("status").GetString());
+        Assert.Equal("internal", api.GetProperty("visibility").GetString());
+        Assert.Equal("Plataforma", api.GetProperty("category").GetString());
+        Assert.Equal("v1 / v2", api.GetProperty("version").GetString());
     }
 
     [Fact]

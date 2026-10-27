@@ -56,7 +56,7 @@
           {
             "name": "category",
             "in": "query",
-            "description": "Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Seguridad`).",
+            "description": "Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Datos abiertos`).",
             "schema": {
               "type": "string"
             }
@@ -90,7 +90,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "Id de la API en el catálogo (por ejemplo, `blog`).",
+            "description": "Id de la API en el catálogo (por ejemplo, `pokeapi`).",
             "required": true,
             "schema": {
               "type": "string"
@@ -812,6 +812,7 @@
           "name",
           "description",
           "status",
+          "visibility",
           "category",
           "tags",
           "version"
@@ -828,6 +829,13 @@
             "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "internal",
+              "public"
+            ],
             "type": "string"
           },
           "category": {
@@ -1150,16 +1158,16 @@
       "description": "Estado de la API."
     },
     {
+      "name": "Autenticación",
+      "description": "Emisión de tokens JWT: con el usuario demo o con el cliente OAuth2 demo (client credentials)."
+    },
+    {
       "name": "Catálogo",
       "description": "APIs publicadas en el portal, con búsqueda y filtro por categoría."
     },
     {
       "name": "Clientes",
       "description": "Empresas que usan las APIs del portal."
-    },
-    {
-      "name": "Autenticación",
-      "description": "Emisión de tokens JWT: con el usuario demo o con el cliente OAuth2 demo (client credentials)."
     },
     {
       "name": "Dashboard",

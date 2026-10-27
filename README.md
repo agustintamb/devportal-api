@@ -39,7 +39,7 @@ dotnet user-secrets set JWT_SECRET "<un texto aleatorio de 32 caracteres o más>
 Con la API levantada:
 
 - `curl.exe http://localhost:5080/health` (en Windows PowerShell 5.1 `curl` es un alias de `Invoke-WebRequest`, por eso se usa `curl.exe`) → `{"status":"ok"}`
-- `curl.exe "http://localhost:5080/apis?q=blog"` → solo la Blog API.
+- `curl.exe "http://localhost:5080/apis?q=pokemon"` → solo la PokeAPI.
 - `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código (la
   misma que `openapi/portal-api.json`; ver "Especificación OpenAPI").
 
@@ -58,7 +58,7 @@ Con el mismo `$token`, una suscripción de punta a punta (el `id` sale de la res
 del header `Location`):
 
 ```powershell
-'{"apiId":"blog","plan":"free"}' | Set-Content -NoNewline sub-body.json
+'{"apiId":"pokeapi","plan":"free"}' | Set-Content -NoNewline sub-body.json
 curl.exe -i -X POST http://localhost:5080/subscriptions -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@sub-body.json"
 curl.exe http://localhost:5080/subscriptions -H "Authorization: Bearer $token"
 curl.exe -i -X DELETE http://localhost:5080/subscriptions/<id> -H "Authorization: Bearer $token"
@@ -80,7 +80,7 @@ curl.exe http://localhost:5080/subscriptions -H "Authorization: Bearer $clientTo
 | Método y ruta | Qué hace |
 |---|---|
 | `GET /health` | Estado de la API |
-| `GET /apis?q=&category=` | Catálogo. `q` busca en nombre, descripción y tags sin distinguir mayúsculas ni acentos (`autenticacion` encuentra "autenticación"); `category` filtra por categoría exacta sin distinguir mayúsculas. Ambos son opcionales y se combinan. |
+| `GET /apis?q=&category=` | Catálogo (`portal`, `petstore`, `pokeapi`, en el orden del portal). Cada API trae `visibility`: `internal` (API de la empresa, "Interna" en el portal) o `public` (de terceros, "Pública"); no indica si pide token. `q` busca en nombre, descripción y tags sin distinguir mayúsculas ni acentos (`clasico` encuentra "clásico"); `category` filtra por categoría exacta sin distinguir mayúsculas. Ambos son opcionales y se combinan. |
 | `GET /apis/{id}` | Una API del catálogo; 404 `not_found` si el id no existe |
 | `GET /clients` | Los 8 clientes del portal, en el mismo orden |
 | `POST /auth/token` | Recibe `{ "username", "password" }`. Con el usuario demo (`demo` / `demo1234`, públicos a propósito) devuelve `{ accessToken, tokenType: "Bearer", expiresIn: 3600 }`; si no, 401 `invalid_credentials` |
@@ -146,8 +146,20 @@ Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subs
 al arrancar; la llenan los endpoints de `/subscriptions`, con una fila por usuario y API gracias a
 `UNIQUE (user_name, api_id)`). `id` es un GUID y `created_at` una fecha ISO 8601 en UTC, ambos
 guardados como texto. Las métricas de `GET /dashboard/stats` no están en la base: son una
-constante en `Endpoints/DashboardEndpoints.cs`. Los datos del seed se copiaron a mano de los mocks del portal
-(`fumadocs-api-portal/src/data/`). Los tags se guardan como texto JSON en `apis.tags_json`.
+constante en `Endpoints/DashboardEndpoints.cs`. El catálogo de `seed.sql` es el mismo del portal
+(`fumadocs-api-portal/src/data/apis.ts`), en el mismo orden y con los mismos valores; la actividad
+y las métricas del dashboard nombran esas APIs. Los tags se guardan como texto JSON en
+`apis.tags_json` y la visibilidad (`internal` / `public`) en `apis.visibility`.
+
+**Después de cambiar `schema.sql` o `seed.sql`, borrar la base local** (`src/DevportalApi/db/portal.db`):
+`CREATE TABLE IF NOT EXISTS` no modifica una tabla que ya existe (no le agrega columnas nuevas, como
+`visibility`) y el seed solo corre con la tabla `apis` vacía, así que una base vieja queda con el
+esquema y los datos anteriores (y `GET /apis` falla porque falta la columna). Al borrarla, el
+próximo arranque la crea y la siembra de nuevo. En Render no hace falta: la base se crea en cada deploy.
+
+```powershell
+Remove-Item src/DevportalApi/db/portal.db
+```
 
 ## Configuración
 
@@ -237,6 +249,11 @@ y 403 en los endpoints protegidos, según la policy de cada uno). La API la sirv
 - **`servers`**: "Producción" usa `PROD_URL` (ver "Configuración") y "Local" es
   `http://localhost:5080`. Si se define `PROD_URL` durante el build, la URL también cambia en el
   archivo generado.
+- **Orden de los tags**: la lista `_tagOrder` de `OpenApiDocumentation.cs` fija el orden de las
+  secciones de la spec (y del menú del portal): Salud, Autenticación, Catálogo, Clientes, Dashboard,
+  Suscripciones. Para cambiarlo se edita esa lista; no depende del orden de los `Map…Endpoints()` en
+  `Program.cs`. Un tag que no está en la lista (hoy, Uso) va al final, y si hay varios, por nombre.
+  Cada tag nuevo necesita además su descripción en `_tagDescriptions`.
 - **Saltos de línea**: `.gitattributes` fija `eol=lf` para `openapi/*.json`, así el archivo es igual
   en Windows y en Linux y git no lo marca como modificado.
 
@@ -285,7 +302,7 @@ Para probar la imagen en local (requiere Docker, que no es necesario para desarr
 ```powershell
 docker build -t devportal-api .
 docker run --rm -p 8080:8080 -e JWT_SECRET="<un texto aleatorio de 32 caracteres o más>" devportal-api
-curl.exe "http://localhost:8080/apis?q=autenticacion"
+curl.exe "http://localhost:8080/apis?q=clasico"
 ```
 
 ### CI (`.github/workflows/ci.yml`)
@@ -297,8 +314,8 @@ scripts que se ejecutan uno tras otro y frenan si uno falla):
    `dotnet build`, `git diff --exit-code openapi/portal-api.json` (falla si el build cambió la spec
    y no se commiteó) y `dotnet test`.
 2. **`docker`**: arma la imagen, la levanta con un `JWT_SECRET` descartable (`openssl rand`),
-   espera a que responda `/health` y prueba con `curl`: `/health` da 200, `/apis?q=autenticacion`
-   devuelve la Auth API (prueba que la imagen tiene ICU) y `/dashboard/stats` sin token da 401
+   espera a que responda `/health` y prueba con `curl`: `/health` da 200, `/apis?q=clasico`
+   devuelve la Petstore API, cuya descripción dice "clásico" (prueba que la imagen tiene ICU), y `/dashboard/stats` sin token da 401
    `unauthorized`. Al final muestra los logs del contenedor.
 3. **`deploy`**: solo en push a `main` y si los dos anteriores pasaron. Hace
    `curl -X POST "$RENDER_DEPLOY_HOOK"`, una URL secreta de Render que dispara un deploy. Si el
@@ -360,7 +377,7 @@ devportal-api/
 │       ├── Data/
 │       │   ├── Database.cs           # Abre conexiones SQLite y crea/siembra la base al arrancar
 │       │   ├── schema.sql            # CREATE TABLE IF NOT EXISTS de las 4 tablas (recurso embebido)
-│       │   └── seed.sql              # Datos iniciales copiados de los mocks del portal (recurso embebido)
+│       │   └── seed.sql              # Datos iniciales: el catálogo del portal, clientes y actividad (recurso embebido)
 │       ├── Endpoints/
 │       │   ├── HealthEndpoints.cs    # Un archivo por recurso, con sus rutas agrupadas con MapGroup
 │       │   ├── ApisEndpoints.cs      # GET /apis (búsqueda y filtro) y GET /apis/{id}
@@ -375,7 +392,7 @@ devportal-api/
 │           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h y scope opcional)
 │           ├── ApiKeyAuthentication.cs # Esquema de autenticación "ApiKey": valida el header X-API-Key y responde el 401
 │           ├── AuthPolicies.cs       # Policies de autorización: tokens de usuario, scope subscriptions:read y API key
-│           ├── OpenApiDocumentation.cs # Transformers de OpenAPI: info, servers, descripciones de tags, enums y textos en español
+│           ├── OpenApiDocumentation.cs # Transformers de OpenAPI: info, servers, orden y descripciones de tags, enums y textos en español
 │           └── OpenApiSecurity.cs    # Transformers de OpenAPI: esquemas bearerAuth, apiKeyAuth y oauth2, y security + 401/403 por endpoint
 └── tests/
     └── DevportalApi.Tests/           # Proyecto de tests (xUnit)
@@ -545,7 +562,7 @@ Notas:
   `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` o `<InvariantGlobalization>true</InvariantGlobalization>`
   en el proyecto, o con imágenes sin ICU (Alpine, Ubuntu chiseled), la comparación deja de ignorar
   acentos. Por eso el `Dockerfile` usa la imagen `aspnet` completa (no chiseled ni Alpine) y CI lo
-  comprueba buscando `autenticacion` contra el contenedor.
+  comprueba buscando `clasico` contra el contenedor.
 - **Filtros opcionales**: `string? q` vale `null` si el parámetro no viene. Los endpoints tratan
   igual `null`, vacío y espacios (`string.IsNullOrWhiteSpace`), así `?q=` devuelve todo.
 - **JWT de punta a punta**: `Tokens.cs` arma el token con `JsonWebTokenHandler.CreateToken` (claims
@@ -567,14 +584,20 @@ Notas:
   enviado lo rechaza ASP.NET antes de llegar al endpoint, y esa respuesta no sería el 400
   `validation_error` del formato único.
 - **Transformers de OpenAPI**: `AddDocumentTransformer` corre una vez sobre todo el documento
-  (registra `components.securitySchemes` con `bearerAuth`, `apiKeyAuth` y `oauth2`; pone info, `servers` y descripciones de tags) y
+  (registra `components.securitySchemes` con `bearerAuth`, `apiKeyAuth` y `oauth2`; pone info, `servers`, el orden y las descripciones de tags) y
   `AddOperationTransformer` corre por cada endpoint: si su metadata tiene `IAuthorizeData` (lo
   agrega `RequireAuthorization()`, con el nombre de la policy), le suma el `security` que
   corresponde (`apiKeyAuth` para la policy `ApiKey`; `bearerAuth` y, en `GET /subscriptions`, también
   `oauth2` con `subscriptions:read` como alternativa) y las respuestas 401/403 con
   `$ref` a `ErrorResponse`. `AddSchemaTransformer` corre por cada schema (también por cada propiedad
-  y cada parámetro) y agrega los `enum` de `plan` y `status`: como se validan con un `if` (no son
-  `enum` de C#), ASP.NET no puede deducirlos solo.
+  y cada parámetro) y agrega los `enum` de `plan`, `status` y `visibility`: como se validan con un `if` o
+  son valores fijos del seed (no son `enum` de C#), ASP.NET no puede deducirlos solo.
+- **Ordenar con un comparador (`SortedSet` + `Comparer<T>.Create`)**: `document.Tags` es un `ISet`
+  (un `Set` de JS). Para ordenarlo, `OpenApiDocumentation.cs` lo reemplaza por un `SortedSet` con un
+  comparador, que es como el callback de `array.sort((a, b) => …)`: devuelve negativo, 0 o positivo.
+  Compara la posición en `_tagOrder` y, si empatan, el nombre: un `SortedSet` descarta como
+  duplicado todo lo que el comparador considera igual (devuelve 0), así que sin el desempate dos tags
+  fuera de la lista quedarían en uno solo.
 - **Documentar los errores**: `ProducesError(404, "…")` (extension method en `ApiErrors.cs`) agrega
   a la metadata del endpoint una respuesta con status, descripción en español y schema
   `ErrorResponse`; la spec la toma de ahí, igual que `WithSummary` o `WithTags`.

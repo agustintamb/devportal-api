@@ -4,11 +4,11 @@ namespace DevportalApi.Endpoints;
 
 public static class UsageEndpoints
 {
-    // Fixed demo values, consistent with the dashboard stats (1.284 requests; Petstore · Blog · Auth).
+    // Fixed demo values, consistent with the dashboard stats (1.284 requests; Portal · Petstore · PokeAPI).
     private static readonly UsageDto _usage = new(
         1284,
         10000,
-        [new("petstore", 642), new("blog", 418), new("auth", 224)]);
+        [new("portal", 418), new("petstore", 642), new("pokeapi", 224)]);
 
     public static IEndpointRouteBuilder MapUsageEndpoints(this IEndpointRouteBuilder app)
     {

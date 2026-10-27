@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS apis (
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   status TEXT NOT NULL,
+  visibility TEXT NOT NULL,
   category TEXT NOT NULL,
   tags_json TEXT NOT NULL,
   version TEXT NOT NULL

@@ -154,6 +154,7 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [InlineData("CreateSubscriptionRequest", "plan", new[] { "free", "pro" })]
     [InlineData("UpdateSubscriptionRequest", "plan", new[] { "free", "pro" })]
     [InlineData("ActivityDto", "status", new[] { "success", "error", "pending" })]
+    [InlineData("ApiDto", "visibility", new[] { "internal", "public" })]
     public async Task SchemaProperty_WithFixedValues_IsStringEnum(string schemaName, string property, string[] values)
     {
         var document = await GetDocumentAsync();
@@ -266,7 +267,7 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var tags = (await GetDocumentAsync()).GetProperty("tags").EnumerateArray().ToList();
 
         Assert.Equal(
-            ["Salud", "Catálogo", "Clientes", "Autenticación", "Dashboard", "Suscripciones", "Uso"],
+            ["Salud", "Autenticación", "Catálogo", "Clientes", "Dashboard", "Suscripciones", "Uso"],
             tags.Select(tag => tag.GetProperty("name").GetString()));
         Assert.All(tags, tag => Assert.False(string.IsNullOrWhiteSpace(tag.GetProperty("description").GetString())));
     }

@@ -36,6 +36,16 @@ public static class OpenApiDocumentation
         las suscripciones creadas no son permanentes.
         """;
 
+    // Order of the sections in the spec (and in the portal menu). A tag missing here goes last, by name.
+    private static readonly string[] _tagOrder = ["Salud", "Autenticación", "Catálogo", "Clientes", "Dashboard", "Suscripciones"];
+
+    // Sorts by position in _tagOrder; ties (tags outside the list) by name, so SortedSet never drops one as a duplicate.
+    private static readonly Comparer<OpenApiTag> _tagComparer = Comparer<OpenApiTag>.Create((left, right) =>
+    {
+        var byOrder = TagPosition(left).CompareTo(TagPosition(right));
+        return byOrder != 0 ? byOrder : string.CompareOrdinal(left.Name, right.Name);
+    });
+
     private static readonly Dictionary<string, string> _tagDescriptions = new()
     {
         ["Salud"] = "Estado de la API.",
@@ -59,6 +69,9 @@ public static class OpenApiDocumentation
     private static readonly string[] _plans = ["free", "pro"];
     private static readonly string[] _activityStatuses = ["success", "error", "pending"];
 
+    // Values of apis.visibility in seed.sql: "internal" = the company's own API, "public" = third party.
+    private static readonly string[] _visibilities = ["internal", "public"];
+
     public static OpenApiOptions AddPortalApiDocumentation(this OpenApiOptions options, string productionUrl)
     {
         options.AddDocumentTransformer((document, _, _) =>
@@ -75,7 +88,9 @@ public static class OpenApiDocumentation
                 new OpenApiServer { Url = productionUrl, Description = "Producción" },
                 new OpenApiServer { Url = LocalUrl, Description = "Local" },
             ];
-            foreach (var tag in document.Tags ?? new HashSet<OpenApiTag>())
+            // Rebuilt as a SortedSet so the spec lists the tags in _tagOrder, whatever the order of Map… calls in Program.cs.
+            document.Tags = new SortedSet<OpenApiTag>(document.Tags ?? Enumerable.Empty<OpenApiTag>(), _tagComparer);
+            foreach (var tag in document.Tags)
             {
                 tag.Description = _tagDescriptions.GetValueOrDefault(tag.Name ?? "");
             }
@@ -123,6 +138,7 @@ public static class OpenApiDocumentation
     private static string[]? AllowedValues(OpenApiSchemaTransformerContext context) => context switch
     {
         { JsonPropertyInfo.Name: "plan" } => _plans,
+        { JsonPropertyInfo: { Name: "visibility", DeclaringType: var type } } when type == typeof(ApiDto) => _visibilities,
         { JsonPropertyInfo: { Name: "status", DeclaringType: var type } } when type == typeof(ActivityDto) => _activityStatuses,
         { JsonPropertyInfo: null, ParameterDescription.Name: "status" } => _activityStatuses,
         _ => null,
@@ -130,4 +146,10 @@ public static class OpenApiDocumentation
 
     private static bool IsRequestWithOptionalStrings(Type? type) =>
         type == typeof(CreateSubscriptionRequest) || type == typeof(UpdateSubscriptionRequest) || type == typeof(OAuthTokenRequest);
+
+    private static int TagPosition(OpenApiTag tag)
+    {
+        var index = Array.IndexOf(_tagOrder, tag.Name);
+        return index >= 0 ? index : _tagOrder.Length;
+    }
 }

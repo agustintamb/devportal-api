@@ -12,7 +12,7 @@ public static class ApisEndpoints
     // Column aliases (AS ...) match the snake_case columns to the ApiRow constructor parameters.
     private const string SelectApis = """
         SELECT id AS Id, name AS Name, description AS Description, status AS Status,
-               category AS Category, tags_json AS TagsJson, version AS Version
+               visibility AS Visibility, category AS Category, tags_json AS TagsJson, version AS Version
         FROM apis
         """;
 
@@ -39,7 +39,7 @@ public static class ApisEndpoints
     private static async Task<IResult> ListApisAsync(
         Database database,
         [Description("Texto a buscar en el nombre, la descripción y los tags, sin distinguir mayúsculas ni acentos.")] string? q,
-        [Description("Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Seguridad`).")] string? category)
+        [Description("Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Datos abiertos`).")] string? category)
     {
         await using var connection = await database.OpenConnectionAsync();
         // ORDER BY rowid = seed insertion order = portal order.
@@ -61,7 +61,7 @@ public static class ApisEndpoints
 
     private static async Task<IResult> GetApiAsync(
         Database database,
-        [Description("Id de la API en el catálogo (por ejemplo, `blog`).")] string id)
+        [Description("Id de la API en el catálogo (por ejemplo, `pokeapi`).")] string id)
     {
         await using var connection = await database.OpenConnectionAsync();
         var row = await connection.QuerySingleOrDefaultAsync<ApiRow>($"{SelectApis} WHERE id = @id", new { id });
@@ -71,7 +71,7 @@ public static class ApisEndpoints
             : TypedResults.Ok(ToDto(row));
     }
 
-    // IgnoreNonSpace skips accents, so "autenticacion" matches "autenticación".
+    // IgnoreNonSpace skips accents, so "clasico" matches "clásico".
     private static bool ContainsText(string source, string value) =>
         CultureInfo.InvariantCulture.CompareInfo.IndexOf(
             source, value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
@@ -81,6 +81,7 @@ public static class ApisEndpoints
         row.Name,
         row.Description,
         row.Status,
+        row.Visibility,
         row.Category,
         JsonSerializer.Deserialize<string[]>(row.TagsJson) ?? [],
         row.Version);
@@ -90,6 +91,7 @@ public static class ApisEndpoints
         string Name,
         string Description,
         string Status,
+        string Visibility,
         string Category,
         string TagsJson,
         string Version);
