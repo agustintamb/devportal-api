@@ -120,6 +120,15 @@ public class OAuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
         await AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
     }
 
+    [Fact]
+    public async Task ClientTokenWithSeveralScopes_CanListSubscriptions()
+    {
+        var response = await SendAsync(
+            HttpMethod.Get, "/subscriptions", TestTokens.Create(scope: "other:scope subscriptions:read"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Theory]
     [InlineData("GET", "/dashboard/stats", null)]
     [InlineData("POST", "/subscriptions", """{ "apiId": "petstore", "plan": "free" }""")]

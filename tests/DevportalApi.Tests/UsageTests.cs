@@ -18,6 +18,7 @@ public class UsageTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var response = await _client.SendAsync(UsageRequest(apiKey));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("ApiKey", Assert.Single(response.Headers.WwwAuthenticate).Scheme);
         var error = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error");
         Assert.Equal("unauthorized", error.GetProperty("code").GetString());
         Assert.Contains("X-API-Key", error.GetProperty("message").GetString());
