@@ -12,9 +12,9 @@ public static class OpenApiDocumentation
     private const string LocalUrl = "http://localhost:5080";
 
     private const string Description = """
-        API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard y
-        suscripciones del usuario. Los endpoints de **Dashboard** y **Suscripciones** requieren un token;
-        el resto es público.
+        API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard,
+        suscripciones del usuario y consumo de la API key. Los endpoints de **Dashboard** y **Suscripciones**
+        requieren un token, **Uso** requiere una API key y el resto es público.
 
         **Cómo probar un endpoint privado**
 
@@ -25,6 +25,13 @@ public static class OpenApiDocumentation
            `Authorization: Bearer <token>`.
         4. Llamar a un endpoint privado, por ejemplo `GET /dashboard/stats` o `POST /subscriptions`.
 
+        **Otras formas de autenticación**
+
+        - **API key** (esquema `apiKeyAuth`): `GET /usage` se llama con el header `X-API-Key: demo-api-key`.
+        - **OAuth2 client credentials** (esquema `oauth2`): `POST /oauth/token` con el cliente `portal-demo` /
+          `portal-demo-secret` emite un token con el scope `subscriptions:read`, que actúa en nombre del
+          usuario demo y solo sirve para `GET /subscriptions`; en los demás endpoints privados responde 403.
+
         Los datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que
         las suscripciones creadas no son permanentes.
         """;
@@ -34,9 +41,10 @@ public static class OpenApiDocumentation
         ["Salud"] = "Estado de la API.",
         ["Catálogo"] = "APIs publicadas en el portal, con búsqueda y filtro por categoría.",
         ["Clientes"] = "Empresas que usan las APIs del portal.",
-        ["Autenticación"] = "Emisión del token JWT con el usuario demo.",
+        ["Autenticación"] = "Emisión de tokens JWT: con el usuario demo o con el cliente OAuth2 demo (client credentials).",
         ["Dashboard"] = "Métricas y actividad reciente del portal. Requiere token.",
         ["Suscripciones"] = "Suscripciones del usuario del token a las APIs del catálogo. Requiere token.",
+        ["Uso"] = "Consumo del mes de la API key. Requiere API key.",
     };
 
     // Error responses get their description with ProducesError; these replace the English defaults ("OK", …).
@@ -99,9 +107,9 @@ public static class OpenApiDocumentation
                 schema.Type = JsonSchemaType.String;
                 schema.Enum = [.. values.Select(value => JsonValue.Create(value))];
             }
-            else if (IsSubscriptionRequest(context.JsonPropertyInfo?.DeclaringType) && schema.Type is { } type)
+            else if (IsRequestWithOptionalStrings(context.JsonPropertyInfo?.DeclaringType) && schema.Type is { } type)
             {
-                // Request fields are `string?` only so a missing field reaches the endpoint (400); clients send strings.
+                // These fields are `string?` only so a missing field reaches the endpoint; clients send strings or omit them.
                 schema.Type = type & ~JsonSchemaType.Null;
             }
 
@@ -120,6 +128,6 @@ public static class OpenApiDocumentation
         _ => null,
     };
 
-    private static bool IsSubscriptionRequest(Type? type) =>
-        type == typeof(CreateSubscriptionRequest) || type == typeof(UpdateSubscriptionRequest);
+    private static bool IsRequestWithOptionalStrings(Type? type) =>
+        type == typeof(CreateSubscriptionRequest) || type == typeof(UpdateSubscriptionRequest) || type == typeof(OAuthTokenRequest);
 }

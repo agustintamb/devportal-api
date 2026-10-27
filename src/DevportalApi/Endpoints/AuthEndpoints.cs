@@ -5,7 +5,7 @@ namespace DevportalApi.Endpoints;
 public static class AuthEndpoints
 {
     // Public on purpose: this is a demo API and the credentials are documented in the spec.
-    private const string DemoUsername = "demo";
+    public const string DemoUsername = "demo";
     private const string DemoPassword = "demo1234";
 
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)

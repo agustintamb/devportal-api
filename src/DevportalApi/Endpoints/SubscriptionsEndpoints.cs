@@ -21,14 +21,17 @@ public static class SubscriptionsEndpoints
 
     public static IEndpointRouteBuilder MapSubscriptionsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/subscriptions").WithTags("Suscripciones").RequireAuthorization();
+        // Authorization per route: listing also accepts OAuth client tokens with subscriptions:read; the rest, only user tokens.
+        var group = app.MapGroup("/subscriptions").WithTags("Suscripciones");
 
         group.MapGet("", ListSubscriptionsAsync)
+            .RequireAuthorization(AuthPolicies.SubscriptionsRead)
             .WithName("listSubscriptions")
             .WithSummary("Listar las suscripciones del usuario")
             .Produces<IReadOnlyList<SubscriptionDto>>();
 
         group.MapPost("", CreateSubscriptionAsync)
+            .RequireAuthorization()
             .WithName("createSubscription")
             .WithSummary("Suscribirse a una API del catálogo")
             .Produces<SubscriptionDto>(StatusCodes.Status201Created)
@@ -38,12 +41,14 @@ public static class SubscriptionsEndpoints
 
         // `:guid` is a route constraint: a non-GUID id matches no route, so the global 404 answers it.
         group.MapGet("/{id:guid}", GetSubscriptionAsync)
+            .RequireAuthorization()
             .WithName("getSubscription")
             .WithSummary("Obtener una suscripción del usuario")
             .Produces<SubscriptionDto>()
             .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         group.MapPatch("/{id:guid}", UpdateSubscriptionAsync)
+            .RequireAuthorization()
             .WithName("updateSubscription")
             .WithSummary("Cambiar el plan de una suscripción")
             .Produces<SubscriptionDto>()
@@ -51,6 +56,7 @@ public static class SubscriptionsEndpoints
             .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         group.MapDelete("/{id:guid}", DeleteSubscriptionAsync)
+            .RequireAuthorization()
             .WithName("deleteSubscription")
             .WithSummary("Cancelar una suscripción")
             .Produces(StatusCodes.Status204NoContent)

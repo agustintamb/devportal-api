@@ -6,7 +6,8 @@ del portal de desarrolladores hecho con Fumadocs. Expone recursos del mismo domi
 
 Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis/{id}`), clientes
 (`GET /clients`), token JWT (`POST /auth/token`), dashboard privado (`GET /dashboard/stats`,
-`GET /dashboard/activity`), suscripciones privadas del usuario (CRUD en `/subscriptions`), base
+`GET /dashboard/activity`), suscripciones privadas del usuario (CRUD en `/subscriptions`), consumo
+con API key (`GET /usage`), token OAuth2 client credentials (`POST /oauth/token`), base
 SQLite sembrada al arrancar, CORS, formato único de errores y especificación OpenAPI generada desde
 el código: se sirve en `/openapi/v1.json` y cada `dotnet build` la escribe en `openapi/portal-api.json`
 (el archivo que copia el portal). Se despliega en Render como imagen Docker, con CI en GitHub
@@ -64,6 +65,16 @@ curl.exe -i -X DELETE http://localhost:5080/subscriptions/<id> -H "Authorization
 Remove-Item sub-body.json
 ```
 
+Las otras dos formas de autenticación (ver "Formas de autenticación"):
+
+```powershell
+# API key en el header X-API-Key
+curl.exe http://localhost:5080/usage -H "X-API-Key: demo-api-key"
+# OAuth2 client credentials: el cliente va en el cuerpo (o con -u portal-demo:portal-demo-secret, como Basic)
+$clientToken = (curl.exe -s -X POST http://localhost:5080/oauth/token -d grant_type=client_credentials -d client_id=portal-demo -d client_secret=portal-demo-secret | ConvertFrom-Json).access_token
+curl.exe http://localhost:5080/subscriptions -H "Authorization: Bearer $clientToken"
+```
+
 ## Endpoints
 
 | Método y ruta | Qué hace |
@@ -80,6 +91,8 @@ Remove-Item sub-body.json
 | `GET /subscriptions/{id}` | **Privado.** Una suscripción del usuario |
 | `PATCH /subscriptions/{id}` | **Privado.** Recibe `{ "plan" }` y devuelve la suscripción con el plan cambiado; 400 si el plan no es válido |
 | `DELETE /subscriptions/{id}` | **Privado.** Cancela la suscripción: 204 sin cuerpo |
+| `POST /oauth/token` | OAuth2 client credentials (RFC 6749). Recibe un formulario (`application/x-www-form-urlencoded`) con `grant_type=client_credentials`, el cliente demo (`portal-demo` / `portal-demo-secret`, públicos a propósito) en el cuerpo (`client_id`, `client_secret`) o como `Authorization: Basic`, y `scope` opcional. Devuelve `{ access_token, token_type: "Bearer", expires_in: 3600, scope }` |
+| `GET /usage` | **Con API key** (`X-API-Key: demo-api-key`). Consumo del mes (valores fijos en el código): `{ requestsThisMonth, monthlyLimit, byApi: [{ apiId, requests }] }` |
 
 En `/subscriptions/{id}`, un id inexistente, uno que no es un GUID o uno que pertenece a otro
 usuario dan el mismo 404 `not_found`, y la suscripción ajena no se lee, modifica ni borra: todas
@@ -93,6 +106,32 @@ Flujo de prueba de un endpoint privado (desde el playground del portal o con `cu
 Los endpoints privados exigen el header `Authorization: Bearer <accessToken>`. El token es un JWT
 HS256 firmado con `JWT_SECRET`, con emisor `devportal-api`, audiencia `devportal-portal`, `sub` = el
 usuario y vencimiento a la hora (sin tolerancia: vencido es vencido).
+
+### Formas de autenticación
+
+La API muestra tres métodos, cada uno con su esquema en la spec (todas las credenciales son de demo
+y públicas a propósito):
+
+| Método | Esquema en la spec | Cómo se obtiene y se envía | Qué permite |
+|---|---|---|---|
+| JWT de usuario | `bearerAuth` | `POST /auth/token` con `demo` / `demo1234` → `Authorization: Bearer <accessToken>` | Todos los endpoints de Dashboard y Suscripciones |
+| API key | `apiKeyAuth` | Fija: header `X-API-Key: demo-api-key` | Solo `GET /usage` |
+| OAuth2 client credentials | `oauth2` (flujo `clientCredentials`, `tokenUrl` `/oauth/token`, relativo al server) | `POST /oauth/token` con `portal-demo` / `portal-demo-secret` → `Authorization: Bearer <access_token>` | Solo lo que cubren sus scopes: con `subscriptions:read`, `GET /subscriptions` |
+
+- **El token del cliente OAuth es del usuario demo**: lleva `sub` = `demo` (por eso
+  `GET /subscriptions` devuelve las suscripciones de demo) y un claim `scope` (scopes separados por
+  espacios). Los tokens de `POST /auth/token` no tienen `scope`.
+- **Los scopes se aplican**: un token con `scope` que no incluye `subscriptions:read` recibe 403
+  `forbidden` en `GET /subscriptions`, y cualquier token con `scope` recibe 403 en el resto de los
+  endpoints privados (por ejemplo, `GET /dashboard/stats` o `POST /subscriptions`). Las reglas están
+  en `Infrastructure/AuthPolicies.cs`.
+- **`scope` en `POST /oauth/token`**: si no se envía, se otorgan todos los scopes del cliente; si
+  pide uno que el cliente no tiene, responde 400 `invalid_scope`.
+- **Credenciales del cliente**: se aceptan en el cuerpo (`client_secret_post`) y en el header
+  `Authorization: Basic base64(id:secret)` (`client_secret_basic`, lo que el playground de Fumadocs
+  usa por defecto); si viene el header, se usa ese.
+- **Errores de `POST /oauth/token`**: siguen el estándar OAuth 2.0 (`{ "error", "error_description" }`),
+  una excepción documentada al formato único (ver "Formato de errores").
 
 ## Base de datos
 
@@ -151,9 +190,25 @@ Todas las respuestas de error usan el mismo cuerpo, con mensajes en español:
 | Parámetro inválido (por ejemplo, `GET /dashboard/activity?status=otro`), campo obligatorio faltante o `plan` distinto de `free`/`pro` en `/subscriptions`, o cuerpo JSON vacío o mal formado (en `Development` ASP.NET lo lanza como `BadHttpRequestException` y `ApiErrors.cs` lo convierte en 400) | 400 | `validation_error` |
 | Usuario o contraseña incorrectos en `POST /auth/token` | 401 | `invalid_credentials` |
 | Endpoint privado sin token, con otro esquema (`Basic …`), con firma inválida, de otra audiencia o vencido; además lleva el header `WWW-Authenticate: Bearer` | 401 | `unauthorized` |
+| `GET /usage` sin `X-API-Key` o con una key incorrecta; además lleva el header `WWW-Authenticate: ApiKey` | 401 | `unauthorized` |
+| Token de cliente OAuth (con `scope`) en un endpoint que sus scopes no cubren | 403 | `forbidden` |
 | Método no permitido en una ruta existente | 405 | `method_not_allowed` |
+| Cuerpo con un `Content-Type` que el endpoint no acepta (por ejemplo, JSON en `POST /oauth/token`) | 415 | `unsupported_media_type` |
 | Excepción no controlada (sin detalles internos ni stack) | 500 | `internal_error` |
 | Otro status de error sin cuerpo | 4xx/5xx | `http_error` |
+
+**Excepción: `POST /oauth/token`.** Como endpoint de token OAuth 2.0, sus errores siguen el RFC 6749
+para que cualquier cliente OAuth los entienda: `{ "error": "invalid_client", "error_description": "…" }`.
+
+| Situación | Status | `error` |
+|---|---|---|
+| Sin cuerpo o sin `grant_type` | 400 | `invalid_request` |
+| `grant_type` distinto de `client_credentials` | 400 | `unsupported_grant_type` |
+| `scope` que el cliente no tiene | 400 | `invalid_scope` |
+| Cliente o secreto incorrectos (también lleva `WWW-Authenticate: Basic`) | 401 | `invalid_client` |
+
+La respuesta correcta lleva `Cache-Control: no-store`, como pide el RFC. Un cuerpo que no es
+formulario lo rechaza el ruteo antes de llegar al endpoint (415 con el formato único, ver arriba).
 
 ## Especificación OpenAPI
 
@@ -161,8 +216,8 @@ La spec se genera desde el código: rutas, DTOs y metadata de cada endpoint (`Wi
 `operationId`, `WithSummary`, `WithTags`, `ProducesError`, `[Description]` en los parámetros), más
 los transformers de `Infrastructure/OpenApiDocumentation.cs` (título, descripción con el flujo de
 prueba, `servers`, descripciones de los tags, enums y textos en español) y de
-`Infrastructure/OpenApiSecurity.cs` (esquema `bearerAuth`; `security` y 401 en los endpoints
-privados). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
+`Infrastructure/OpenApiSecurity.cs` (esquemas `bearerAuth`, `apiKeyAuth` y `oauth2`; `security`, 401
+y 403 en los endpoints protegidos, según la policy de cada uno). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
 `openapi/portal-api.json`, que se versiona y es la que copia el portal.
 
 - **Generación en el build**: el paquete `Microsoft.Extensions.ApiDescription.Server` agrega un paso
@@ -298,7 +353,7 @@ devportal-api/
 │   └── DevportalApi/                 # El proyecto web (la API)
 │       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos, UserSecretsId y generación de la spec
 │       ├── Program.cs                # Punto de entrada: registra servicios (CORS, OpenAPI, JWT), inicializa la base, arma el pipeline y mapea endpoints
-│       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto, SubscriptionDto y los cuerpos de /subscriptions
+│       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto, SubscriptionDto, los cuerpos de /subscriptions, UsageDto y los de OAuth (snake_case)
 │       ├── appsettings.json          # Configuración por defecto (se puede pisar con variables de entorno)
 │       ├── Properties/
 │       │   └── launchSettings.json   # Perfil de `dotnet run` en local: puerto 5080 y entorno Development
@@ -311,13 +366,17 @@ devportal-api/
 │       │   ├── ApisEndpoints.cs      # GET /apis (búsqueda y filtro) y GET /apis/{id}
 │       │   ├── ClientsEndpoints.cs   # GET /clients
 │       │   ├── AuthEndpoints.cs      # POST /auth/token (usuario demo → JWT)
+│       │   ├── OAuthEndpoints.cs     # POST /oauth/token (cliente OAuth2 demo → JWT con scope; errores RFC 6749)
 │       │   ├── DashboardEndpoints.cs # GET /dashboard/stats y /dashboard/activity (grupo con RequireAuthorization)
-│       │   └── SubscriptionsEndpoints.cs # CRUD privado de /subscriptions, filtrado siempre por el usuario del token
+│       │   ├── SubscriptionsEndpoints.cs # CRUD privado de /subscriptions, filtrado siempre por el usuario del token
+│       │   └── UsageEndpoints.cs     # GET /usage, protegido con la API key
 │       └── Infrastructure/
 │           ├── ApiErrors.cs          # Formato único de errores, su manejo global y `ProducesError` (documenta un error en la spec)
-│           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h)
+│           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h y scope opcional)
+│           ├── ApiKeyAuthentication.cs # Esquema de autenticación "ApiKey": valida el header X-API-Key y responde el 401
+│           ├── AuthPolicies.cs       # Policies de autorización: tokens de usuario, scope subscriptions:read y API key
 │           ├── OpenApiDocumentation.cs # Transformers de OpenAPI: info, servers, descripciones de tags, enums y textos en español
-│           └── OpenApiSecurity.cs    # Transformers de OpenAPI: esquema bearerAuth y security + 401 en los endpoints privados
+│           └── OpenApiSecurity.cs    # Transformers de OpenAPI: esquemas bearerAuth, apiKeyAuth y oauth2, y security + 401/403 por endpoint
 └── tests/
     └── DevportalApi.Tests/           # Proyecto de tests (xUnit)
         ├── DevportalApi.Tests.csproj
@@ -332,6 +391,8 @@ devportal-api/
         ├── AuthTests.cs              # Token con credenciales demo, credenciales malas, cuerpo mal formado y JWT_SECRET faltante o corto
         ├── DashboardTests.cs         # 401 en cada caso de token inválido, stats, filtro de actividad, 400 y security en OpenAPI
         ├── SubscriptionsTests.cs     # CRUD de suscripciones, 400/409/422, 404 con id ajeno o inválido y 401 sin token
+        ├── UsageTests.cs             # GET /usage: 401 sin key, con key mala o con un JWT; 200 con la key demo
+        ├── OAuthTests.cs             # POST /oauth/token (cuerpo y Basic, errores RFC 6749) y scopes: 200 en GET /subscriptions, 403 fuera de sus scopes
         └── OpenApiTests.cs           # Contenido de la spec (operationIds, security, enums, servers, tags) y archivo versionado igual al servido
 ```
 
@@ -361,11 +422,16 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 4. **Autenticación** (`app.UseAuthentication()`): responde "¿quién sos?". Si viene
    `Authorization: Bearer <token>`, JwtBearer valida firma, emisor, audiencia y vencimiento según
    los `TokenValidationParameters` de `Program.cs`, y deja el usuario en `HttpContext.User`. No
-   rechaza nada: un request sin token sigue como anónimo.
+   rechaza nada: un request sin token sigue como anónimo. JwtBearer es el esquema por defecto
+   (`AddAuthentication(JwtBearerDefaults.AuthenticationScheme)`); el esquema `ApiKey` solo corre
+   cuando lo pide la policy de `/usage`.
 5. **Autorización** (`app.UseAuthorization()`): responde "¿puede pasar?". Si el endpoint pide
-   autorización (`RequireAuthorization()` en los grupos `/dashboard` y `/subscriptions`) y el usuario es anónimo, corta
-   con un *challenge*: el evento `OnChallenge` de `Program.cs` escribe el 401 `unauthorized` con el
-   formato único y el header `WWW-Authenticate: Bearer`.
+   autorización (`RequireAuthorization()` en `/dashboard` y `/subscriptions`, o
+   `RequireAuthorization(AuthPolicies.ApiKey)` en `/usage`) y el usuario es anónimo, corta
+   con un *challenge*: el evento `OnChallenge` de `Program.cs` (o `HandleChallengeAsync` de
+   `ApiKeyAuthentication.cs`) escribe el 401 `unauthorized` con el formato único y el header
+   `WWW-Authenticate`. Si el usuario está autenticado pero la policy no se cumple (un token de
+   cliente OAuth fuera de sus scopes), responde 403 sin cuerpo y el paso 2 escribe `forbidden`.
    Estos dos middlewares van explícitos y después de `UseCors()`: si no se llaman, ASP.NET los
    agrega solo, pero **antes** de CORS, y los 401 salen sin `Access-Control-Allow-Origin` (el
    navegador no dejaría al portal leer el error). Lo cubre un test de `CorsTests.cs`.
@@ -412,6 +478,10 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | Autenticación + autorización (`UseAuthentication`, `UseAuthorization`) | Un middleware tipo `passport.authenticate('jwt')` que llena `req.user`, más un guard que corta con 401 | `Program.cs` |
 | `AddJwtBearer` + `TokenValidationParameters` | `jwt.verify(token, secret, { issuer, audience, algorithms })` de `jsonwebtoken` | `Program.cs` |
 | `RequireAuthorization()` en un `MapGroup` | Montar un router de Express detrás del middleware de auth (`router.use(requireAuth)`) | `DashboardEndpoints.cs` |
+| Handler de autenticación propio (`AuthenticationHandler<T>`, `AddScheme`) | Una estrategia propia de passport (`passport-headerapikey`) que lee un header y llena `req.user` | `Infrastructure/ApiKeyAuthentication.cs` |
+| Policies de autorización (`AddPolicy`, `RequireAssertion`, `RequireAuthorization("Policy")`) | Guards con nombre (`requireScope('subscriptions:read')`) que deciden con el usuario ya autenticado | `Infrastructure/AuthPolicies.cs`, `SubscriptionsEndpoints.cs` |
+| `request.ReadFormAsync()` + `.Accepts<T>("application/x-www-form-urlencoded")` | `express.urlencoded()` y leer `req.body.grant_type`; `Accepts` solo documenta el cuerpo en la spec y hace que el ruteo rechace otros `Content-Type` (415) | `OAuthEndpoints.cs` |
+| `[property: JsonPropertyName("access_token")]` en un record | Renombrar una propiedad al serializar (`{ access_token: token.accessToken }`) | `OAuthTokenResponse` en `Contracts.cs` |
 | `ClaimsPrincipal` / claims | El payload decodificado del JWT (`{ sub, aud, exp, … }`) | `HttpContext.User`; `sub` se crea en `Tokens.cs` |
 | Validación explícita de un parámetro | Un `if (!['success', 'error', 'pending'].includes(status))` que responde 400 | `ListActivityAsync` en `DashboardEndpoints.cs` |
 | Transformers de OpenAPI (documento, operación y schema) | Un plugin que post-procesa el objeto de la spec antes de servirla | `Infrastructure/OpenApiSecurity.cs`, `Infrastructure/OpenApiDocumentation.cs` |
@@ -497,9 +567,11 @@ Notas:
   enviado lo rechaza ASP.NET antes de llegar al endpoint, y esa respuesta no sería el 400
   `validation_error` del formato único.
 - **Transformers de OpenAPI**: `AddDocumentTransformer` corre una vez sobre todo el documento
-  (registra `components.securitySchemes.bearerAuth`; pone info, `servers` y descripciones de tags) y
+  (registra `components.securitySchemes` con `bearerAuth`, `apiKeyAuth` y `oauth2`; pone info, `servers` y descripciones de tags) y
   `AddOperationTransformer` corre por cada endpoint: si su metadata tiene `IAuthorizeData` (lo
-  agrega `RequireAuthorization()`), le suma `security: [{ bearerAuth: [] }]` y la respuesta 401 con
+  agrega `RequireAuthorization()`, con el nombre de la policy), le suma el `security` que
+  corresponde (`apiKeyAuth` para la policy `ApiKey`; `bearerAuth` y, en `GET /subscriptions`, también
+  `oauth2` con `subscriptions:read` como alternativa) y las respuestas 401/403 con
   `$ref` a `ErrorResponse`. `AddSchemaTransformer` corre por cada schema (también por cada propiedad
   y cada parámetro) y agrega los `enum` de `plan` y `status`: como se validan con un `if` (no son
   `enum` de C#), ASP.NET no puede deducirlos solo.

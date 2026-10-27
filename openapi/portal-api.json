@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "Portal API",
-    "description": "API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard y\nsuscripciones del usuario. Los endpoints de **Dashboard** y **Suscripciones** requieren un token;\nel resto es público.\n\n**Cómo probar un endpoint privado**\n\n1. Llamar a `POST /auth/token` con el usuario demo (credenciales públicas a propósito):\n   `{ \"username\": \"demo\", \"password\": \"demo1234\" }`.\n2. Copiar el `accessToken` de la respuesta (vence en una hora).\n3. Pegarlo en la sección **Autorización** (esquema `bearerAuth`); se envía como\n   `Authorization: Bearer <token>`.\n4. Llamar a un endpoint privado, por ejemplo `GET /dashboard/stats` o `POST /subscriptions`.\n\nLos datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que\nlas suscripciones creadas no son permanentes.",
+    "description": "API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard,\nsuscripciones del usuario y consumo de la API key. Los endpoints de **Dashboard** y **Suscripciones**\nrequieren un token, **Uso** requiere una API key y el resto es público.\n\n**Cómo probar un endpoint privado**\n\n1. Llamar a `POST /auth/token` con el usuario demo (credenciales públicas a propósito):\n   `{ \"username\": \"demo\", \"password\": \"demo1234\" }`.\n2. Copiar el `accessToken` de la respuesta (vence en una hora).\n3. Pegarlo en la sección **Autorización** (esquema `bearerAuth`); se envía como\n   `Authorization: Bearer <token>`.\n4. Llamar a un endpoint privado, por ejemplo `GET /dashboard/stats` o `POST /subscriptions`.\n\n**Otras formas de autenticación**\n\n- **API key** (esquema `apiKeyAuth`): `GET /usage` se llama con el header `X-API-Key: demo-api-key`.\n- **OAuth2 client credentials** (esquema `oauth2`): `POST /oauth/token` con el cliente `portal-demo` /\n  `portal-demo-secret` emite un token con el scope `subscriptions:read`, que actúa en nombre del\n  usuario demo y solo sirve para `GET /subscriptions`; en los demás endpoints privados responde 403.\n\nLos datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que\nlas suscripciones creadas no son permanentes.",
     "version": "1.0.0"
   },
   "servers": [
@@ -197,6 +197,68 @@
         }
       }
     },
+    "/oauth/token": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Obtener un token con OAuth2 client credentials",
+        "description": "Cliente demo, público a propósito: `client_id` `portal-demo` y `client_secret` `portal-demo-secret`, en el cuerpo o en el header `Authorization: Basic`. El token actúa en nombre del usuario demo y solo sirve para lo que cubren sus scopes: con `subscriptions:read`, `GET /subscriptions`. Las respuestas y los errores siguen el estándar OAuth 2.0 (RFC 6749), no el formato de errores del resto de la API.",
+        "operationId": "createOAuthToken",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta `grant_type` o el cuerpo (`invalid_request`), el grant no es `client_credentials` (`unsupported_grant_type`) o se pidió un scope que el cliente no tiene (`invalid_scope`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Cliente o secreto incorrectos (`invalid_client`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "El cuerpo no es `application/x-www-form-urlencoded` (`unsupported_media_type`, con el formato de errores de la API).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dashboard/stats": {
       "get": {
         "tags": [
@@ -220,6 +282,16 @@
           },
           "401": {
             "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -291,6 +363,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -330,11 +412,26 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
           {
             "bearerAuth": [ ]
+          },
+          {
+            "oauth2": [
+              "subscriptions:read"
+            ]
           }
         ]
       },
@@ -404,6 +501,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -455,6 +562,16 @@
           },
           "401": {
             "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -538,6 +655,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -587,11 +714,58 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "El token es de un cliente OAuth y sus scopes no cubren este endpoint (`forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
           {
             "bearerAuth": [ ]
+          }
+        ]
+      }
+    },
+    "/usage": {
+      "get": {
+        "tags": [
+          "Uso"
+        ],
+        "summary": "Obtener el consumo del mes de la API key",
+        "description": "Requiere la API key demo, pública a propósito: header `X-API-Key: demo-api-key` (en la sección Autorización, esquema `apiKeyAuth`).",
+        "operationId": "getUsage",
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta la API key (header `X-API-Key`) o no es válida (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": [ ]
           }
         ]
       }
@@ -670,6 +844,22 @@
           }
         }
       },
+      "ApiUsageDto": {
+        "required": [
+          "apiId",
+          "requests"
+        ],
+        "type": "object",
+        "properties": {
+          "apiId": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "ClientDto": {
         "required": [
           "name",
@@ -737,6 +927,69 @@
         "type": "object",
         "properties": {
           "status": {
+            "type": "string"
+          }
+        }
+      },
+      "OAuthErrorResponse": {
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        }
+      },
+      "OAuthTokenRequest": {
+        "required": [
+          "grant_type"
+        ],
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "description": "Siempre `client_credentials`."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "Id del cliente, si no se envía en el header `Authorization: Basic`."
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "Secreto del cliente, si no se envía en el header `Authorization: Basic`."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scopes separados por espacios; sin el parámetro se otorgan todos los del cliente."
+          }
+        }
+      },
+      "OAuthTokenResponse": {
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "scope"
+        ],
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "token_type": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scope": {
             "type": "string"
           }
         }
@@ -838,6 +1091,30 @@
             "type": "string"
           }
         }
+      },
+      "UsageDto": {
+        "required": [
+          "requestsThisMonth",
+          "monthlyLimit",
+          "byApi"
+        ],
+        "type": "object",
+        "properties": {
+          "requestsThisMonth": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "monthlyLimit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "byApi": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiUsageDto"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -846,6 +1123,24 @@
         "description": "Token obtenido con POST /auth/token.",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "description": "API key demo, pública a propósito: `demo-api-key`. Solo sirve para GET /usage.",
+        "name": "X-API-Key",
+        "in": "header"
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "description": "Client credentials con el cliente demo, público a propósito: `portal-demo` / `portal-demo-secret`. El token actúa en nombre del usuario demo y solo sirve para GET /subscriptions.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "/oauth/token",
+            "scopes": {
+              "subscriptions:read": "Leer las suscripciones del usuario demo."
+            }
+          }
+        }
       }
     }
   },
@@ -864,7 +1159,7 @@
     },
     {
       "name": "Autenticación",
-      "description": "Emisión del token JWT con el usuario demo."
+      "description": "Emisión de tokens JWT: con el usuario demo o con el cliente OAuth2 demo (client credentials)."
     },
     {
       "name": "Dashboard",
@@ -873,6 +1168,10 @@
     {
       "name": "Suscripciones",
       "description": "Suscripciones del usuario del token a las APIs del catálogo. Requiere token."
+    },
+    {
+      "name": "Uso",
+      "description": "Consumo del mes de la API key. Requiere API key."
     }
   ]
 }

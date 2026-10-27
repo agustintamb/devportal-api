@@ -34,13 +34,22 @@ public sealed class Tokens
 
     public SymmetricSecurityKey SigningKey { get; }
 
-    public string Create(string username) =>
-        new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+    // `scope` (space-separated) is only set for OAuth client tokens; user tokens have no "scope" claim.
+    public string Create(string username, string? scope = null)
+    {
+        var identity = new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, username)]);
+        if (scope is not null)
+        {
+            identity.AddClaim(new Claim(AuthPolicies.ScopeClaim, scope));
+        }
+
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = Issuer,
             Audience = Audience,
-            Subject = new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, username)]),
+            Subject = identity,
             Expires = DateTime.UtcNow.Add(Lifetime),
             SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
         });
+    }
 }

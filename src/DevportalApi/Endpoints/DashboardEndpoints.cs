@@ -20,7 +20,7 @@ public static class DashboardEndpoints
 
     public static IEndpointRouteBuilder MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
-        // RequireAuthorization on the group: every route below needs a valid JWT.
+        // RequireAuthorization on the group: every route below needs a valid user JWT (the default policy).
         var group = app.MapGroup("/dashboard").WithTags("Dashboard").RequireAuthorization();
 
         group.MapGet("/stats", GetStats)

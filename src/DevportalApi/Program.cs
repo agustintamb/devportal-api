@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using DevportalApi.Data;
 using DevportalApi.Endpoints;
 using DevportalApi.Infrastructure;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
@@ -29,7 +30,7 @@ var productionUrl = builder.Configuration["PROD_URL"] is { Length: > 0 } prodUrl
     : OpenApiDocumentation.DefaultProductionUrl;
 builder.Services.AddOpenApi(options => options
     .AddPortalApiDocumentation(productionUrl)
-    .AddBearerSecurity());
+    .AddPortalApiSecurity());
 
 // Fails at startup (before serving requests) if JWT_SECRET is missing or too short.
 // The spec generator never serves requests, so it gets a random throwaway secret instead.
@@ -39,7 +40,8 @@ var jwtSecret = isGeneratingOpenApi
 var tokens = new Tokens(jwtSecret);
 builder.Services.AddSingleton(tokens);
 
-builder.Services.AddAuthentication().AddJwtBearer(options =>
+// JWT is the default scheme (used by UseAuthentication on every request); ApiKey only runs for the policy that names it.
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     // Keeps claim names as they are in the JWT ("sub") instead of mapping them to long .NET names.
     options.MapInboundClaims = false;
@@ -66,8 +68,9 @@ builder.Services.AddAuthentication().AddJwtBearer(options =>
                 .ExecuteAsync(context.HttpContext);
         },
     };
-});
-builder.Services.AddAuthorization();
+})
+.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, null);
+builder.Services.AddAuthorization(AuthPolicies.Configure);
 
 // A relative DB_PATH is resolved against the content root (the project folder with `dotnet run`).
 var configuredDbPath = builder.Configuration["DB_PATH"];
@@ -91,7 +94,9 @@ app.MapHealthEndpoints();
 app.MapApisEndpoints();
 app.MapClientsEndpoints();
 app.MapAuthEndpoints();
+app.MapOAuthEndpoints();
 app.MapDashboardEndpoints();
 app.MapSubscriptionsEndpoints();
+app.MapUsageEndpoints();
 
 app.Run();

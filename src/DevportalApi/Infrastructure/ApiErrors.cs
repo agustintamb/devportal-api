@@ -45,8 +45,10 @@ public static class ApiErrors
     private static IResult FromStatusCode(int status) => status switch
     {
         StatusCodes.Status400BadRequest => Problem(status, "validation_error", "La solicitud tiene un cuerpo o parámetros con formato inválido."),
+        StatusCodes.Status403Forbidden => Problem(status, "forbidden", "El token no tiene permiso para este recurso."),
         StatusCodes.Status404NotFound => Problem(status, "not_found", "El recurso solicitado no existe."),
         StatusCodes.Status405MethodNotAllowed => Problem(status, "method_not_allowed", "El método HTTP no está permitido para este recurso."),
+        StatusCodes.Status415UnsupportedMediaType => Problem(status, "unsupported_media_type", "El Content-Type del cuerpo no es el que acepta este endpoint."),
         _ => Problem(status, "http_error", "La solicitud no pudo completarse."),
     };
 }

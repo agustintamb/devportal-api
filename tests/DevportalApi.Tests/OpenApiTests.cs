@@ -27,6 +27,7 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         "get /apis/{id}",
         "get /clients",
         "post /auth/token",
+        "post /oauth/token",
     ];
 
     private readonly HttpClient _client = factory.CreateClient();
@@ -38,21 +39,77 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
 
         var operations = Operations(document).Select(operation => operation.Key).Order();
 
-        Assert.Equal(_publicOperations.Concat(_privateOperations).Order(), operations);
+        Assert.Equal(_publicOperations.Concat(_privateOperations).Append("get /usage").Order(), operations);
     }
 
     [Fact]
-    public async Task PrivateOperations_DeclareBearerSecurityAndUnauthorizedErrorResponse()
+    public async Task PrivateOperations_DeclareBearerSecurityAndUnauthorizedAndForbiddenErrorResponses()
     {
         var operations = Operations(await GetDocumentAsync());
 
         foreach (var key in _privateOperations)
         {
             var operation = operations[key];
-            var security = Assert.Single(operation.GetProperty("security").EnumerateArray());
-            Assert.True(security.TryGetProperty("bearerAuth", out _), key);
+            var security = operation.GetProperty("security").EnumerateArray().ToList();
+            Assert.True(security[0].TryGetProperty("bearerAuth", out _), key);
+            Assert.Equal(key == "get /subscriptions" ? 2 : 1, security.Count);
             Assert.Equal(ErrorResponseRef, ResponseSchemaRef(operation, "401"));
+            Assert.Equal(ErrorResponseRef, ResponseSchemaRef(operation, "403"));
         }
+    }
+
+    [Fact]
+    public async Task ListSubscriptions_AcceptsOAuth2WithReadScopeAsAlternative()
+    {
+        var operation = Operations(await GetDocumentAsync())["get /subscriptions"];
+
+        var oauth2 = operation.GetProperty("security")[1].GetProperty("oauth2");
+        Assert.Equal(["subscriptions:read"], oauth2.EnumerateArray().Select(scope => scope.GetString()));
+    }
+
+    [Fact]
+    public async Task Usage_DeclaresApiKeySecurityAndUnauthorizedErrorResponse()
+    {
+        var operation = Operations(await GetDocumentAsync())["get /usage"];
+
+        var security = Assert.Single(operation.GetProperty("security").EnumerateArray());
+        Assert.True(security.TryGetProperty("apiKeyAuth", out _));
+        Assert.Equal(ErrorResponseRef, ResponseSchemaRef(operation, "401"));
+        Assert.False(operation.GetProperty("responses").TryGetProperty("403", out _));
+    }
+
+    [Fact]
+    public async Task Document_DeclaresTheThreeSecuritySchemes()
+    {
+        var schemes = (await GetDocumentAsync()).GetProperty("components").GetProperty("securitySchemes");
+
+        Assert.Equal(["apiKeyAuth", "bearerAuth", "oauth2"], schemes.EnumerateObject().Select(scheme => scheme.Name).Order());
+        Assert.Equal("bearer", schemes.GetProperty("bearerAuth").GetProperty("scheme").GetString());
+
+        var apiKey = schemes.GetProperty("apiKeyAuth");
+        Assert.Equal("apiKey", apiKey.GetProperty("type").GetString());
+        Assert.Equal("header", apiKey.GetProperty("in").GetString());
+        Assert.Equal("X-API-Key", apiKey.GetProperty("name").GetString());
+        Assert.Contains("demo-api-key", apiKey.GetProperty("description").GetString());
+
+        var oauth2 = schemes.GetProperty("oauth2");
+        Assert.Equal("oauth2", oauth2.GetProperty("type").GetString());
+        var flow = oauth2.GetProperty("flows").GetProperty("clientCredentials");
+        Assert.Equal("/oauth/token", flow.GetProperty("tokenUrl").GetString());
+        Assert.True(flow.GetProperty("scopes").TryGetProperty("subscriptions:read", out _));
+        Assert.Contains("portal-demo-secret", oauth2.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task OAuthToken_DeclaresFormBodyAndOAuthErrors()
+    {
+        var operation = Operations(await GetDocumentAsync())["post /oauth/token"];
+
+        var form = operation.GetProperty("requestBody").GetProperty("content").GetProperty("application/x-www-form-urlencoded");
+        Assert.True(form.GetProperty("schema").TryGetProperty("$ref", out _));
+        Assert.Equal("#/components/schemas/OAuthErrorResponse", ResponseSchemaRef(operation, "400"));
+        Assert.Equal("#/components/schemas/OAuthErrorResponse", ResponseSchemaRef(operation, "401"));
+        Assert.Equal(ErrorResponseRef, ResponseSchemaRef(operation, "415"));
     }
 
     [Fact]
@@ -108,13 +165,16 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(values, schema.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
     }
 
-    [Fact]
-    public async Task CreateSubscriptionApiId_IsNonNullableString()
+    [Theory]
+    [InlineData("CreateSubscriptionRequest", "apiId")]
+    [InlineData("OAuthTokenRequest", "client_id")]
+    [InlineData("OAuthTokenRequest", "scope")]
+    public async Task OptionalRequestField_IsNonNullableString(string schemaName, string property)
     {
         var document = await GetDocumentAsync();
 
-        var schema = document.GetProperty("components").GetProperty("schemas").GetProperty("CreateSubscriptionRequest")
-            .GetProperty("properties").GetProperty("apiId");
+        var schema = document.GetProperty("components").GetProperty("schemas").GetProperty(schemaName)
+            .GetProperty("properties").GetProperty(property);
 
         Assert.Equal("string", schema.GetProperty("type").GetString());
     }
@@ -206,7 +266,7 @@ public class OpenApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         var tags = (await GetDocumentAsync()).GetProperty("tags").EnumerateArray().ToList();
 
         Assert.Equal(
-            ["Salud", "Catálogo", "Clientes", "Autenticación", "Dashboard", "Suscripciones"],
+            ["Salud", "Catálogo", "Clientes", "Autenticación", "Dashboard", "Suscripciones", "Uso"],
             tags.Select(tag => tag.GetProperty("name").GetString()));
         Assert.All(tags, tag => Assert.False(string.IsNullOrWhiteSpace(tag.GetProperty("description").GetString())));
     }
