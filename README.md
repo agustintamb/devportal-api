@@ -9,7 +9,8 @@ Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis
 `GET /dashboard/activity`), suscripciones privadas del usuario (CRUD en `/subscriptions`), base
 SQLite sembrada al arrancar, CORS, formato único de errores y especificación OpenAPI generada desde
 el código: se sirve en `/openapi/v1.json` y cada `dotnet build` la escribe en `openapi/portal-api.json`
-(el archivo que copia el portal).
+(el archivo que copia el portal). Se despliega en Render como imagen Docker, con CI en GitHub
+Actions (ver "Deploy").
 
 ## Requisitos
 
@@ -184,6 +185,99 @@ privados). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
 - **Saltos de línea**: `.gitattributes` fija `eol=lf` para `openapi/*.json`, así el archivo es igual
   en Windows y en Linux y git no lo marca como modificado.
 
+## Deploy
+
+La API se publica en [Render](https://render.com) (plan Free) como una imagen Docker. GitHub
+Actions compila, prueba y arma la imagen en cada push y en cada pull request; si todo pasa en un
+push a `main`, le avisa a Render que despliegue.
+
+### Imagen Docker (`Dockerfile`)
+
+Es un *multi-stage build*: dos etapas, y solo la última queda en la imagen final.
+
+1. **`build`** (`mcr.microsoft.com/dotnet/sdk:10.0`, con el SDK completo): copia primero el
+   `.csproj` y corre `dotnet restore`, después copia el código y corre `dotnet publish -c Release`,
+   que deja en `/app/publish` la DLL de la API y sus dependencias.
+2. **Runtime** (`mcr.microsoft.com/dotnet/aspnet:10.0`, solo el runtime de ASP.NET, sin compilador):
+   copia lo publicado y arranca con `dotnet DevportalApi.dll`.
+
+En TypeScript sería como correr `npm ci && npm run build` en una etapa `node:22` y copiar solo
+`dist/` (y las dependencias de producción) a una imagen `node:22-slim`: la imagen final no lleva
+el SDK, el código fuente ni los tests. Copiar el `.csproj` antes que el código es el mismo truco
+que copiar `package.json` + `package-lock.json` antes de `npm ci`: Docker cachea cada paso, y
+mientras no cambien los paquetes no vuelve a descargarlos.
+
+Detalles:
+
+- **Imagen `aspnet` completa (Debian)**, no Alpine ni *chiseled*: la búsqueda sin acentos de
+  `GET /apis` necesita ICU (ver "Búsqueda sin acentos" más abajo), y esas variantes no lo traen.
+- **Usuario sin privilegios**: las imágenes de .NET traen el usuario `app` (su id está en la variable
+  `$APP_UID`); `USER $APP_UID` hace que la API no corra como `root`. Como ese usuario no puede
+  escribir en `/app`, el Dockerfile crea antes `/app/db` y se la asigna, porque ahí la API crea
+  `db/portal.db` al arrancar (el content root dentro del contenedor es `/app`).
+- **Puerto 8080**: `ASPNETCORE_HTTP_PORTS=8080` le dice a ASP.NET en qué puerto escuchar (la imagen
+  ya lo trae así; el Dockerfile lo deja explícito). La API no lee `PORT`: esa variable es para
+  Render, que la usa para saber a qué puerto del contenedor mandar el tráfico.
+- **Sin generar la spec**: `dotnet publish` compila, y compilar regenera `openapi/portal-api.json`.
+  Dentro de la imagen no sirve, así que se apaga con `-p:OpenApiGenerateDocuments=false`; el
+  archivo se genera y se commitea en el repo, y CI verifica que esté al día. Por lo mismo la
+  imagen no fija `PROD_URL`: si hiciera falta, se define como variable de entorno en Render.
+- **`.dockerignore`**: como `.gitignore`, pero para lo que se manda a `docker build`. Deja afuera
+  `bin/`, `obj/`, `db/`, los tests, `.git/` y los Markdown.
+
+Para probar la imagen en local (requiere Docker, que no es necesario para desarrollar):
+
+```powershell
+docker build -t devportal-api .
+docker run --rm -p 8080:8080 -e JWT_SECRET="<un texto aleatorio de 32 caracteres o más>" devportal-api
+curl.exe "http://localhost:8080/apis?q=autenticacion"
+```
+
+### CI (`.github/workflows/ci.yml`)
+
+Corre en cada pull request y en cada push a `main`, en tres jobs encadenados con `needs` (como
+scripts que se ejecutan uno tras otro y frenan si uno falla):
+
+1. **`build`**: instala el SDK que pide `global.json`, y corre `dotnet format --verify-no-changes`,
+   `dotnet build`, `git diff --exit-code openapi/portal-api.json` (falla si el build cambió la spec
+   y no se commiteó) y `dotnet test`.
+2. **`docker`**: arma la imagen, la levanta con un `JWT_SECRET` descartable (`openssl rand`),
+   espera a que responda `/health` y prueba con `curl`: `/health` da 200, `/apis?q=autenticacion`
+   devuelve la Auth API (prueba que la imagen tiene ICU) y `/dashboard/stats` sin token da 401
+   `unauthorized`. Al final muestra los logs del contenedor.
+3. **`deploy`**: solo en push a `main` y si los dos anteriores pasaron. Hace
+   `curl -X POST "$RENDER_DEPLOY_HOOK"`, una URL secreta de Render que dispara un deploy. Si el
+   secreto todavía no está cargado, deja un aviso y termina sin error.
+
+### Render
+
+Configuración del Web Service (una sola vez, desde el panel de Render):
+
+- New → Web Service → repo `agustintamb/devportal-api`, runtime **Docker**, plan **Free**.
+- **Auto-Deploy: Off**. Así Render no despliega en cada push por su cuenta, sino solo cuando CI
+  pasa y llama al Deploy Hook.
+- Variables de entorno:
+
+  | Variable | Valor |
+  |---|---|
+  | `JWT_SECRET` | Un texto aleatorio largo (32 caracteres o más). En Render la API corre en el entorno `Production`, donde no se leen user-secrets |
+  | `ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
+  | `PORT` | `8080` |
+
+- Settings → **Deploy Hook**: copiar la URL y guardarla como secreto del repo en GitHub (no se
+  commitea):
+
+  ```powershell
+  gh secret set RENDER_DEPLOY_HOOK --repo agustintamb/devportal-api
+  ```
+
+Limitaciones del plan Free:
+
+- **Cold start**: el servicio se duerme tras unos 15 minutos sin tráfico y el primer request
+  después tarda alrededor de un minuto en responder.
+- **Disco efímero**: la base SQLite vive dentro del contenedor, así que vuelve al seed en cada
+  deploy o reinicio (también al despertar) y se pierden las suscripciones creadas.
+
 ## Cómo está organizado el repo
 
 ```text
@@ -193,6 +287,11 @@ devportal-api/
 ├── .editorconfig                     # Reglas de estilo que aplican el IDE y `dotnet format`
 ├── .gitattributes                    # Normaliza los saltos de línea (LF en el repo; siempre LF en openapi/*.json)
 ├── .gitignore                        # Incluye bin/, obj/ y db/ (base SQLite local)
+├── Dockerfile                        # Imagen para Render: build con el SDK y runtime aspnet (ver "Deploy")
+├── .dockerignore                     # Lo que no se manda a `docker build` (bin/, obj/, db/, tests, .git)
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    # GitHub Actions: format, build, spec al día, tests, imagen Docker y deploy a Render
 ├── openapi/
 │   └── portal-api.json               # Spec OpenAPI generada por `dotnet build` (se versiona; la copia el portal)
 ├── src/
@@ -326,6 +425,8 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | Pattern matching `plan is not ("free" or "pro")` | Chequear un union de literales: `if (plan !== 'free' && plan !== 'pro')` para `'free' \| 'pro'` | `CreateSubscriptionAsync`, `UpdateSubscriptionAsync` |
 | `TypedResults.Created(url, body)` / `TypedResults.NoContent()` | `res.status(201).location(url).json(body)` / `res.status(204).end()` | `SubscriptionsEndpoints.cs` |
 | xUnit + `WebApplicationFactory` | Vitest + supertest | `tests/DevportalApi.Tests` |
+| `dotnet publish -c Release` | `npm run build` que deja en `dist/` solo lo que se ejecuta en producción | `Dockerfile` |
+| Imágenes `sdk` y `aspnet` | `node:22` para compilar y `node:22-slim` para correr | `Dockerfile` |
 
 Notas:
 
@@ -373,7 +474,8 @@ Notas:
   globalización (ICU) del sistema: si algún día se despliega con
   `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` o `<InvariantGlobalization>true</InvariantGlobalization>`
   en el proyecto, o con imágenes sin ICU (Alpine, Ubuntu chiseled), la comparación deja de ignorar
-  acentos. El Dockerfile debe usar una imagen `aspnet` completa (no chiseled ni Alpine).
+  acentos. Por eso el `Dockerfile` usa la imagen `aspnet` completa (no chiseled ni Alpine) y CI lo
+  comprueba buscando `autenticacion` contra el contenedor.
 - **Filtros opcionales**: `string? q` vale `null` si el parámetro no viene. Los endpoints tratan
   igual `null`, vacío y espacios (`string.IsNullOrWhiteSpace`), así `?q=` devuelve todo.
 - **JWT de punta a punta**: `Tokens.cs` arma el token con `JsonWebTokenHandler.CreateToken` (claims

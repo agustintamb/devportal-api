@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Check formatting
+        run: dotnet format --verify-no-changes
+
+      - name: Build
+        run: dotnet build
+
+      - name: Check that the committed OpenAPI spec is up to date
+        run: git diff --exit-code openapi/portal-api.json
+
+      - name: Test
+        run: dotnet test --no-build
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t devportal-api .
+
+      - name: Start container and wait for /health
+        run: |
+          docker run -d --name api -p 8080:8080 \
+            -e JWT_SECRET="$(openssl rand -base64 48)" \
+            -e ALLOWED_ORIGINS="https://agustintamb.github.io" \
+            devportal-api
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::The API did not answer /health within 60 seconds"
+          exit 1
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)" = 200
+
+          # "autenticacion" (no accent) only matches the Auth API if the image has ICU.
+          curl -fsS "http://localhost:8080/apis?q=autenticacion" | tee apis.json
+          jq -e 'length > 0 and any(.[]; .id == "auth")' apis.json
+
+          status=$(curl -s -o stats.json -w '%{http_code}' http://localhost:8080/dashboard/stats)
+          cat stats.json
+          test "$status" = 401
+          jq -e '.error.code == "unauthorized"' stats.json
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
+  deploy:
+    needs: [build, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK is not configured yet; skipping the Render deploy."
+            exit 0
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK" > /dev/null
+          echo "Render deploy triggered."
