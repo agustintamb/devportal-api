@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using Dapper;
@@ -28,13 +29,17 @@ public static class ApisEndpoints
             .WithName("getApi")
             .WithSummary("Obtener una API del catálogo")
             .Produces<ApiDto>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+            .ProducesError(StatusCodes.Status404NotFound, "No existe una API con ese id (`not_found`).");
 
         return app;
     }
 
     // `q` and `category` are not route parameters, so ASP.NET binds them from the query string.
-    private static async Task<IResult> ListApisAsync(Database database, string? q, string? category)
+    // [Description] becomes the parameter description in the OpenAPI spec.
+    private static async Task<IResult> ListApisAsync(
+        Database database,
+        [Description("Texto a buscar en el nombre, la descripción y los tags, sin distinguir mayúsculas ni acentos.")] string? q,
+        [Description("Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Seguridad`).")] string? category)
     {
         await using var connection = await database.OpenConnectionAsync();
         // ORDER BY rowid = seed insertion order = portal order.
@@ -54,7 +59,9 @@ public static class ApisEndpoints
         return TypedResults.Ok(apis);
     }
 
-    private static async Task<IResult> GetApiAsync(Database database, string id)
+    private static async Task<IResult> GetApiAsync(
+        Database database,
+        [Description("Id de la API en el catálogo (por ejemplo, `blog`).")] string id)
     {
         await using var connection = await database.OpenConnectionAsync();
         var row = await connection.QuerySingleOrDefaultAsync<ApiRow>($"{SelectApis} WHERE id = @id", new { id });

@@ -15,8 +15,13 @@ public static class AuthEndpoints
         group.MapPost("/token", CreateToken)
             .WithName("createToken")
             .WithSummary("Obtener un token de acceso con el usuario demo")
+            .WithDescription(
+                "Credenciales demo, públicas a propósito: usuario `demo` y contraseña `demo1234`. " +
+                "El `accessToken` de la respuesta se pega en la sección Autorización (o se envía como " +
+                "`Authorization: Bearer <token>`) para llamar a los endpoints de Dashboard y Suscripciones.")
             .Produces<TokenResponse>()
-            .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized);
+            .ProducesError(StatusCodes.Status400BadRequest, "Cuerpo vacío o con JSON mal formado (`validation_error`).")
+            .ProducesError(StatusCodes.Status401Unauthorized, "Usuario o contraseña incorrectos (`invalid_credentials`).");
 
         return app;
     }

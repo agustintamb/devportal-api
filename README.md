@@ -7,8 +7,9 @@ del portal de desarrolladores hecho con Fumadocs. Expone recursos del mismo domi
 Estado actual: salud (`GET /health`), catálogo de APIs (`GET /apis`, `GET /apis/{id}`), clientes
 (`GET /clients`), token JWT (`POST /auth/token`), dashboard privado (`GET /dashboard/stats`,
 `GET /dashboard/activity`), suscripciones privadas del usuario (CRUD en `/subscriptions`), base
-SQLite sembrada al arrancar, CORS, formato único de errores y documento OpenAPI con el esquema de
-seguridad `bearerAuth`.
+SQLite sembrada al arrancar, CORS, formato único de errores y especificación OpenAPI generada desde
+el código: se sirve en `/openapi/v1.json` y cada `dotnet build` la escribe en `openapi/portal-api.json`
+(el archivo que copia el portal).
 
 ## Requisitos
 
@@ -29,7 +30,7 @@ dotnet user-secrets set JWT_SECRET "<un texto aleatorio de 32 caracteres o más>
 | `dotnet run --project src/DevportalApi` | Levanta la API en `http://localhost:5080` |
 | `dotnet user-secrets list --project src/DevportalApi` | Muestra los secretos locales guardados |
 | `dotnet test` | Corre los tests de integración |
-| `dotnet build` | Compila la solución (los warnings cuentan como errores) |
+| `dotnet build` | Compila la solución (los warnings cuentan como errores) y regenera `openapi/portal-api.json` |
 | `dotnet format` | Formatea el código según `.editorconfig` |
 | `dotnet format --verify-no-changes` | Falla si hay algo sin formatear (para CI) |
 
@@ -37,7 +38,8 @@ Con la API levantada:
 
 - `curl.exe http://localhost:5080/health` (en Windows PowerShell 5.1 `curl` es un alias de `Invoke-WebRequest`, por eso se usa `curl.exe`) → `{"status":"ok"}`
 - `curl.exe "http://localhost:5080/apis?q=blog"` → solo la Blog API.
-- `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código.
+- `http://localhost:5080/openapi/v1.json` → especificación OpenAPI generada desde el código (la
+  misma que `openapi/portal-api.json`; ver "Especificación OpenAPI").
 
 Para llamar a un endpoint privado, primero se pide un token con el usuario demo (en PowerShell 5.1
 conviene mandar el JSON desde un archivo, porque las comillas dentro de `-d` se pierden al pasar a
@@ -82,6 +84,11 @@ En `/subscriptions/{id}`, un id inexistente, uno que no es un GUID o uno que per
 usuario dan el mismo 404 `not_found`, y la suscripción ajena no se lee, modifica ni borra: todas
 las consultas filtran por `user_name = sub`.
 
+Flujo de prueba de un endpoint privado (desde el playground del portal o con `curl.exe`, ver
+"Comandos"): `POST /auth/token` con `{ "username": "demo", "password": "demo1234" }` → copiar el
+`accessToken` de la respuesta → pegarlo en la sección **Autorización** del playground (o en el header
+`Authorization`) → llamar, por ejemplo, a `GET /dashboard/stats` o `POST /subscriptions`.
+
 Los endpoints privados exigen el header `Authorization: Bearer <accessToken>`. El token es un JWT
 HS256 firmado con `JWT_SECRET`, con emisor `devportal-api`, audiencia `devportal-portal`, `sub` = el
 usuario y vencimiento a la hora (sin tolerancia: vencido es vencido).
@@ -90,8 +97,10 @@ usuario y vencimiento a la hora (sin tolerancia: vencido es vencido).
 
 SQLite en un archivo. Al arrancar, antes de atender requests, la API crea la carpeta de `DB_PATH`
 si falta, corre `Data/schema.sql` (crea las tablas si no existen) y, si la tabla `apis` está vacía,
-corre `Data/seed.sql`. Arrancar de nuevo no duplica datos. Para volver a los datos iniciales en
-local alcanza con borrar el archivo de la base.
+corre `Data/seed.sql`. Arrancar de nuevo no duplica datos. En local el archivo sobrevive a los
+reinicios; para volver a los datos iniciales alcanza con borrarlo. En Render el disco no es
+persistente, así que la base se vuelve a sembrar en cada reinicio o deploy (y se pierden las
+suscripciones creadas); la descripción de la spec lo avisa.
 
 Tablas: `apis`, `clients`, `activity` (la lee `GET /dashboard/activity`) y `subscriptions` (vacía
 al arrancar; la llenan los endpoints de `/subscriptions`, con una fila por usuario y API gracias a
@@ -110,6 +119,7 @@ variable de entorno pisa al archivo.
 | `ALLOWED_ORIGINS` | Orígenes permitidos por CORS, separados por comas | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
 | `DB_PATH` | Archivo de la base SQLite; si es relativo, se resuelve contra la carpeta del proyecto (content root) | `db/portal.db` |
 | `JWT_SECRET` | Clave para firmar y validar los JWT (HS256). Obligatoria y de al menos 32 bytes: si falta o es corta, la API no arranca y el error lo explica | Ninguno: en local va en user-secrets (ver "Comandos"); en Render, como variable de entorno |
+| `PROD_URL` | URL del servidor "Producción" en `servers` de la spec | `https://devportal-api.onrender.com` (placeholder hasta conocer la URL final de Render) |
 
 Con `dotnet run`, la base por defecto queda en `src/DevportalApi/db/portal.db`, carpeta ignorada
 por git (`db/` en `.gitignore`).
@@ -144,6 +154,36 @@ Todas las respuestas de error usan el mismo cuerpo, con mensajes en español:
 | Excepción no controlada (sin detalles internos ni stack) | 500 | `internal_error` |
 | Otro status de error sin cuerpo | 4xx/5xx | `http_error` |
 
+## Especificación OpenAPI
+
+La spec se genera desde el código: rutas, DTOs y metadata de cada endpoint (`WithName` →
+`operationId`, `WithSummary`, `WithTags`, `ProducesError`, `[Description]` en los parámetros), más
+los transformers de `Infrastructure/OpenApiDocumentation.cs` (título, descripción con el flujo de
+prueba, `servers`, descripciones de los tags, enums y textos en español) y de
+`Infrastructure/OpenApiSecurity.cs` (esquema `bearerAuth`; `security` y 401 en los endpoints
+privados). La API la sirve en `/openapi/v1.json`, y `dotnet build` la escribe en
+`openapi/portal-api.json`, que se versiona y es la que copia el portal.
+
+- **Generación en el build**: el paquete `Microsoft.Extensions.ApiDescription.Server` agrega un paso
+  al build que arranca la API con la herramienta `GetDocument.Insider` y guarda el documento. La
+  carpeta y el nombre del archivo salen de `OpenApiDocumentsDirectory` y
+  `OpenApiGenerateDocumentsOptions` en el `.csproj`.
+- **Sin secreto ni base en el build**: la herramienta ejecuta `Program.cs` solo hasta
+  `builder.Build()`, así que la base no se crea. `JWT_SECRET` sí se lee antes, por eso `Program.cs`
+  detecta la herramienta (`Assembly.GetEntryAssembly()` se llama `GetDocument.Insider`) y usa un
+  secreto aleatorio descartable. El build funciona sin user-secrets y no deja archivos fuera de
+  `openapi/`.
+- **Mantenerla al día**: después de cambiar un endpoint o un DTO, `dotnet build` regenera el archivo
+  y el cambio se commitea junto con el código. El test `CommittedSpecFile_MatchesServedDocument`
+  compara el archivo con el documento servido. Como `dotnet test` también compila (y regenera),
+  para detectar en CI un archivo sin commitear conviene correr
+  `git diff --exit-code openapi/portal-api.json` después del build.
+- **`servers`**: "Producción" usa `PROD_URL` (ver "Configuración") y "Local" es
+  `http://localhost:5080`. Si se define `PROD_URL` durante el build, la URL también cambia en el
+  archivo generado.
+- **Saltos de línea**: `.gitattributes` fija `eol=lf` para `openapi/*.json`, así el archivo es igual
+  en Windows y en Linux y git no lo marca como modificado.
+
 ## Cómo está organizado el repo
 
 ```text
@@ -151,10 +191,13 @@ devportal-api/
 ├── DevportalApi.sln                  # Solución: agrupa los proyectos (como un workspace de npm)
 ├── global.json                       # Fija la versión del SDK de .NET (como "engines" o .nvmrc)
 ├── .editorconfig                     # Reglas de estilo que aplican el IDE y `dotnet format`
-├── .gitignore                        # Incluye bin/, obj/ y los archivos *.db (base SQLite local)
+├── .gitattributes                    # Normaliza los saltos de línea (LF en el repo; siempre LF en openapi/*.json)
+├── .gitignore                        # Incluye bin/, obj/ y db/ (base SQLite local)
+├── openapi/
+│   └── portal-api.json               # Spec OpenAPI generada por `dotnet build` (se versiona; la copia el portal)
 ├── src/
 │   └── DevportalApi/                 # El proyecto web (la API)
-│       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos y UserSecretsId
+│       ├── DevportalApi.csproj       # Proyecto: framework, opciones del compilador, paquetes NuGet, recursos embebidos, UserSecretsId y generación de la spec
 │       ├── Program.cs                # Punto de entrada: registra servicios (CORS, OpenAPI, JWT), inicializa la base, arma el pipeline y mapea endpoints
 │       ├── Contracts.cs              # DTOs (records) de entrada y salida: ApiDto, ClientDto, TokenRequest, TokenResponse, StatDto, ActivityDto, SubscriptionDto y los cuerpos de /subscriptions
 │       ├── appsettings.json          # Configuración por defecto (se puede pisar con variables de entorno)
@@ -172,8 +215,9 @@ devportal-api/
 │       │   ├── DashboardEndpoints.cs # GET /dashboard/stats y /dashboard/activity (grupo con RequireAuthorization)
 │       │   └── SubscriptionsEndpoints.cs # CRUD privado de /subscriptions, filtrado siempre por el usuario del token
 │       └── Infrastructure/
-│           ├── ApiErrors.cs          # Formato único de errores y su manejo global
+│           ├── ApiErrors.cs          # Formato único de errores, su manejo global y `ProducesError` (documenta un error en la spec)
 │           ├── Tokens.cs             # Valida JWT_SECRET al arrancar y emite los JWT (emisor, audiencia, 1 h)
+│           ├── OpenApiDocumentation.cs # Transformers de OpenAPI: info, servers, descripciones de tags, enums y textos en español
 │           └── OpenApiSecurity.cs    # Transformers de OpenAPI: esquema bearerAuth y security + 401 en los endpoints privados
 └── tests/
     └── DevportalApi.Tests/           # Proyecto de tests (xUnit)
@@ -188,7 +232,8 @@ devportal-api/
         ├── ClientsTests.cs           # Clientes en el orden del portal
         ├── AuthTests.cs              # Token con credenciales demo, credenciales malas, cuerpo mal formado y JWT_SECRET faltante o corto
         ├── DashboardTests.cs         # 401 en cada caso de token inválido, stats, filtro de actividad, 400 y security en OpenAPI
-        └── SubscriptionsTests.cs     # CRUD de suscripciones, 400/409/422, 404 con id ajeno o inválido y 401 sin token
+        ├── SubscriptionsTests.cs     # CRUD de suscripciones, 400/409/422, 404 con id ajeno o inválido y 401 sin token
+        └── OpenApiTests.cs           # Contenido de la spec (operationIds, security, enums, servers, tags) y archivo versionado igual al servido
 ```
 
 Recursos embebidos: `schema.sql` y `seed.sql` se compilan dentro de la DLL (`<EmbeddedResource>` en
@@ -197,6 +242,7 @@ el `.csproj`), así la API no depende de que esos archivos existan en disco al d
 
 Carpetas generadas (no se versionan): `bin/` contiene lo compilado (como `dist/`) y `obj/` los
 archivos intermedios del build y de la restauración de paquetes (parecido a una caché de build).
+`openapi/` también la genera el build, pero se versiona a propósito (ver "Especificación OpenAPI").
 
 ### Recorrido de un request
 
@@ -269,7 +315,10 @@ Un request pasa por una cadena de middlewares (como en Express) antes de llegar 
 | `RequireAuthorization()` en un `MapGroup` | Montar un router de Express detrás del middleware de auth (`router.use(requireAuth)`) | `DashboardEndpoints.cs` |
 | `ClaimsPrincipal` / claims | El payload decodificado del JWT (`{ sub, aud, exp, … }`) | `HttpContext.User`; `sub` se crea en `Tokens.cs` |
 | Validación explícita de un parámetro | Un `if (!['success', 'error', 'pending'].includes(status))` que responde 400 | `ListActivityAsync` en `DashboardEndpoints.cs` |
-| Transformers de OpenAPI (documento y operación) | Un plugin que post-procesa el objeto de la spec antes de servirla | `Infrastructure/OpenApiSecurity.cs` |
+| Transformers de OpenAPI (documento, operación y schema) | Un plugin que post-procesa el objeto de la spec antes de servirla | `Infrastructure/OpenApiSecurity.cs`, `Infrastructure/OpenApiDocumentation.cs` |
+| Generación de la spec en el build (`Microsoft.Extensions.ApiDescription.Server`) | Un paso de codegen en un script de build (`"prebuild": "generate-openapi"`) cuyo resultado se commitea | `DevportalApi.csproj`, `openapi/portal-api.json` |
+| Atributo `[Description("…")]` en un parámetro | Un decorador o un comentario JSDoc que una herramienta lee para documentar | `ApisEndpoints.cs`, `DashboardEndpoints.cs`, `SubscriptionsEndpoints.cs` |
+| `.gitattributes` (`eol=lf`) | La opción `endOfLine: "lf"` de Prettier, pero aplicada por git al hacer checkout y commit | `.gitattributes` |
 | Restricción de ruta `{id:guid}` + parámetro `Guid id` | `app.get('/subscriptions/:id', …)` más validar a mano que `req.params.id` sea un UUID | `SubscriptionsEndpoints.cs` |
 | Parámetro `ClaimsPrincipal user` en un handler | Leer `req.user` (el payload del JWT) dentro del handler | `UserName` en `SubscriptionsEndpoints.cs` |
 | `Guid.NewGuid()` / tipo `Guid` | `crypto.randomUUID()` (en JSON viaja como string) | `CreateSubscriptionAsync` |
@@ -340,14 +389,27 @@ Notas:
   respondo yo"), vuelve a poner `WWW-Authenticate: Bearer` y escribe el cuerpo con `ApiErrors.Problem`.
 - **Fallar al arrancar**: `new Tokens(builder.Configuration["JWT_SECRET"])` se ejecuta antes de
   `builder.Build()`; si el secreto falta o tiene menos de 32 bytes lanza una excepción y la API no
-  levanta, en vez de firmar tokens con una clave vacía o débil.
+  levanta, en vez de firmar tokens con una clave vacía o débil. La única excepción es el generador de
+  la spec del build (ver "Especificación OpenAPI"), que nunca atiende requests.
 - **`status` como texto**: se valida con un `if` y no con un `enum` de C#, porque un `enum` mal
   enviado lo rechaza ASP.NET antes de llegar al endpoint, y esa respuesta no sería el 400
   `validation_error` del formato único.
 - **Transformers de OpenAPI**: `AddDocumentTransformer` corre una vez sobre todo el documento
-  (registra `components.securitySchemes.bearerAuth`) y `AddOperationTransformer` corre por cada
-  endpoint: si su metadata tiene `IAuthorizeData` (lo agrega `RequireAuthorization()`), le suma
-  `security: [{ bearerAuth: [] }]` y la respuesta 401.
+  (registra `components.securitySchemes.bearerAuth`; pone info, `servers` y descripciones de tags) y
+  `AddOperationTransformer` corre por cada endpoint: si su metadata tiene `IAuthorizeData` (lo
+  agrega `RequireAuthorization()`), le suma `security: [{ bearerAuth: [] }]` y la respuesta 401 con
+  `$ref` a `ErrorResponse`. `AddSchemaTransformer` corre por cada schema (también por cada propiedad
+  y cada parámetro) y agrega los `enum` de `plan` y `status`: como se validan con un `if` (no son
+  `enum` de C#), ASP.NET no puede deducirlos solo.
+- **Documentar los errores**: `ProducesError(404, "…")` (extension method en `ApiErrors.cs`) agrega
+  a la metadata del endpoint una respuesta con status, descripción en español y schema
+  `ErrorResponse`; la spec la toma de ahí, igual que `WithSummary` o `WithTags`.
+- **Números estrictos**: por defecto el JSON de ASP.NET acepta números enviados como texto (`"3600"`)
+  y la spec los declara `integer | string`. `JsonNumberHandling.Strict` en `Program.cs` deja solo
+  números, en la API y en la spec.
+- **`ReplaceLineEndings("\n")`**: un raw string literal toma los saltos de línea del archivo `.cs`
+  (CRLF en un checkout de Windows); se normalizan para que la descripción de la spec no cambie según
+  el sistema.
 - **Cada usuario ve solo lo suyo**: `SubscriptionsEndpoints.cs` toma el usuario del claim `sub`
   (`UserName(user)`) y todas las consultas llevan `WHERE … user_name = @userName`. Una suscripción
   de otro usuario no se distingue de una inexistente: el `UPDATE`/`DELETE` afecta 0 filas y la

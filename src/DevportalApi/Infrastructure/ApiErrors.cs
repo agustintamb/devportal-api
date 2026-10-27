@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
 
 namespace DevportalApi.Infrastructure;
 
@@ -10,6 +11,13 @@ public static class ApiErrors
 {
     public static IResult Problem(int status, string code, string message) =>
         TypedResults.Json(new ErrorResponse(new ErrorDetail(code, message)), statusCode: status);
+
+    // Documents an error response in the OpenAPI spec: status, ErrorResponse body and a description in Spanish.
+    public static RouteHandlerBuilder ProducesError(this RouteHandlerBuilder builder, int status, string description) =>
+        builder.WithMetadata(new ProducesResponseTypeAttribute<ErrorResponse>(status, "application/json")
+        {
+            Description = description,
+        });
 
     // Extension method: lets Program.cs call app.UseApiErrors() as if it were a WebApplication method.
     public static WebApplication UseApiErrors(this WebApplication app)

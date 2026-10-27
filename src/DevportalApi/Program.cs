@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using DevportalApi.Data;
 using DevportalApi.Endpoints;
 using DevportalApi.Infrastructure;
@@ -5,6 +8,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// `dotnet build` runs this file through the OpenAPI generator (GetDocument.Insider) only up to builder.Build().
+var isGeneratingOpenApi = Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
 
 // ASP.NET configuration merges appsettings.json and environment variables under the same key.
 var allowedOrigins = builder.Configuration["ALLOWED_ORIGINS"]
@@ -14,10 +20,23 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins(allowedOrigins)
     .WithHeaders("Content-Type", "Authorization", "X-API-Key")
     .AllowAnyMethod()));
-builder.Services.AddOpenApi(options => options.AddBearerSecurity());
+
+// The web defaults also accept numbers sent as strings ("3600"); Strict keeps JSON numbers (and the spec) as plain integers.
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
+
+var productionUrl = builder.Configuration["PROD_URL"] is { Length: > 0 } prodUrl
+    ? prodUrl
+    : OpenApiDocumentation.DefaultProductionUrl;
+builder.Services.AddOpenApi(options => options
+    .AddPortalApiDocumentation(productionUrl)
+    .AddBearerSecurity());
 
 // Fails at startup (before serving requests) if JWT_SECRET is missing or too short.
-var tokens = new Tokens(builder.Configuration["JWT_SECRET"]);
+// The spec generator never serves requests, so it gets a random throwaway secret instead.
+var jwtSecret = isGeneratingOpenApi
+    ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+    : builder.Configuration["JWT_SECRET"];
+var tokens = new Tokens(jwtSecret);
 builder.Services.AddSingleton(tokens);
 
 builder.Services.AddAuthentication().AddJwtBearer(options =>

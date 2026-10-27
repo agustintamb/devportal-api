@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Security.Claims;
 using Dapper;
@@ -13,6 +14,11 @@ public static class SubscriptionsEndpoints
         FROM subscriptions
         """;
 
+    private const string SubscriptionIdDescription = "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.";
+
+    private const string SubscriptionNotFoundDescription =
+        "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).";
+
     public static IEndpointRouteBuilder MapSubscriptionsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/subscriptions").WithTags("Suscripciones").RequireAuthorization();
@@ -26,29 +32,29 @@ public static class SubscriptionsEndpoints
             .WithName("createSubscription")
             .WithSummary("Suscribirse a una API del catálogo")
             .Produces<SubscriptionDto>(StatusCodes.Status201Created)
-            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
-            .Produces<ErrorResponse>(StatusCodes.Status422UnprocessableEntity);
+            .ProducesError(StatusCodes.Status400BadRequest, "Falta `apiId`, `plan` no es free ni pro o el JSON está mal formado (`validation_error`).")
+            .ProducesError(StatusCodes.Status409Conflict, "El usuario ya tiene una suscripción a esa API (`already_subscribed`).")
+            .ProducesError(StatusCodes.Status422UnprocessableEntity, "La API no está en el catálogo (`unknown_api`).");
 
         // `:guid` is a route constraint: a non-GUID id matches no route, so the global 404 answers it.
         group.MapGet("/{id:guid}", GetSubscriptionAsync)
             .WithName("getSubscription")
             .WithSummary("Obtener una suscripción del usuario")
             .Produces<SubscriptionDto>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+            .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         group.MapPatch("/{id:guid}", UpdateSubscriptionAsync)
             .WithName("updateSubscription")
             .WithSummary("Cambiar el plan de una suscripción")
             .Produces<SubscriptionDto>()
-            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+            .ProducesError(StatusCodes.Status400BadRequest, "`plan` no es free ni pro o el JSON está mal formado (`validation_error`).")
+            .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         group.MapDelete("/{id:guid}", DeleteSubscriptionAsync)
             .WithName("deleteSubscription")
             .WithSummary("Cancelar una suscripción")
             .Produces(StatusCodes.Status204NoContent)
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+            .ProducesError(StatusCodes.Status404NotFound, SubscriptionNotFoundDescription);
 
         return app;
     }
@@ -120,7 +126,10 @@ public static class SubscriptionsEndpoints
         return TypedResults.Created($"/subscriptions/{subscription.Id}", subscription);
     }
 
-    private static async Task<IResult> GetSubscriptionAsync(Guid id, Database database, ClaimsPrincipal user)
+    private static async Task<IResult> GetSubscriptionAsync(
+        [Description(SubscriptionIdDescription)] Guid id,
+        Database database,
+        ClaimsPrincipal user)
     {
         await using var connection = await database.OpenConnectionAsync();
         var row = await connection.QuerySingleOrDefaultAsync<SubscriptionRow>(
@@ -131,7 +140,7 @@ public static class SubscriptionsEndpoints
     }
 
     private static async Task<IResult> UpdateSubscriptionAsync(
-        Guid id,
+        [Description(SubscriptionIdDescription)] Guid id,
         UpdateSubscriptionRequest request,
         Database database,
         ClaimsPrincipal user)
@@ -154,7 +163,10 @@ public static class SubscriptionsEndpoints
         return row is null ? SubscriptionNotFound(id) : TypedResults.Ok(ToDto(row));
     }
 
-    private static async Task<IResult> DeleteSubscriptionAsync(Guid id, Database database, ClaimsPrincipal user)
+    private static async Task<IResult> DeleteSubscriptionAsync(
+        [Description(SubscriptionIdDescription)] Guid id,
+        Database database,
+        ClaimsPrincipal user)
     {
         await using var connection = await database.OpenConnectionAsync();
         var deleted = await connection.ExecuteAsync(

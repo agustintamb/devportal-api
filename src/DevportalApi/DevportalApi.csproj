@@ -8,11 +8,21 @@
     <UserSecretsId>06a5ecd0-f243-49cb-b370-a1415aa50464</UserSecretsId>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- Microsoft.Extensions.ApiDescription.Server writes the OpenAPI document on every build: openapi/portal-api.json at the repo root. -->
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/../../openapi</OpenApiDocumentsDirectory>
+    <OpenApiGenerateDocumentsOptions>--file-name portal-api</OpenApiGenerateDocumentsOptions>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.89" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.14">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Dapper;
 using DevportalApi.Data;
 using DevportalApi.Infrastructure;
@@ -31,14 +32,16 @@ public static class DashboardEndpoints
             .WithName("listDashboardActivity")
             .WithSummary("Listar la actividad reciente")
             .Produces<IReadOnlyList<ActivityDto>>()
-            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
+            .ProducesError(StatusCodes.Status400BadRequest, "El parámetro `status` no es success, error ni pending (`validation_error`).");
 
         return app;
     }
 
     private static IResult GetStats() => TypedResults.Ok(_stats);
 
-    private static async Task<IResult> ListActivityAsync(Database database, string? status)
+    private static async Task<IResult> ListActivityAsync(
+        Database database,
+        [Description("Filtra por estado; sin el parámetro devuelve toda la actividad.")] string? status)
     {
         var filter = string.IsNullOrWhiteSpace(status) ? null : status.Trim();
         if (filter is not null && !_activityStatuses.Contains(filter))

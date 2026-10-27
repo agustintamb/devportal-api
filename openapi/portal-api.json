@@ -1,0 +1,878 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Portal API",
+    "description": "API de prueba del portal de desarrolladores: catálogo de APIs, clientes, métricas del dashboard y\nsuscripciones del usuario. Los endpoints de **Dashboard** y **Suscripciones** requieren un token;\nel resto es público.\n\n**Cómo probar un endpoint privado**\n\n1. Llamar a `POST /auth/token` con el usuario demo (credenciales públicas a propósito):\n   `{ \"username\": \"demo\", \"password\": \"demo1234\" }`.\n2. Copiar el `accessToken` de la respuesta (vence en una hora).\n3. Pegarlo en la sección **Autorización** (esquema `bearerAuth`); se envía como\n   `Authorization: Bearer <token>`.\n4. Llamar a un endpoint privado, por ejemplo `GET /dashboard/stats` o `POST /subscriptions`.\n\nLos datos son de demostración: la base se vuelve a sembrar en cada reinicio del servidor, así que\nlas suscripciones creadas no son permanentes.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://devportal-api.onrender.com",
+      "description": "Producción"
+    },
+    {
+      "url": "http://localhost:5080",
+      "description": "Local"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Salud"
+        ],
+        "summary": "Consultar el estado de la API",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apis": {
+      "get": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Listar el catálogo de APIs",
+        "operationId": "listApis",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Texto a buscar en el nombre, la descripción y los tags, sin distinguir mayúsculas ni acentos.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Categoría exacta, sin distinguir mayúsculas (por ejemplo, `Seguridad`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apis/{id}": {
+      "get": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Obtener una API del catálogo",
+        "operationId": "getApi",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id de la API en el catálogo (por ejemplo, `blog`).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe una API con ese id (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/clients": {
+      "get": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Listar los clientes que usan las APIs",
+        "operationId": "listClients",
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClientDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/token": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Obtener un token de acceso con el usuario demo",
+        "description": "Credenciales demo, públicas a propósito: usuario `demo` y contraseña `demo1234`. El `accessToken` de la respuesta se pega en la sección Autorización (o se envía como `Authorization: Bearer <token>`) para llamar a los endpoints de Dashboard y Suscripciones.",
+        "operationId": "createToken",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cuerpo vacío o con JSON mal formado (`validation_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Usuario o contraseña incorrectos (`invalid_credentials`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/stats": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Obtener las métricas del dashboard",
+        "operationId": "getDashboardStats",
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StatDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      }
+    },
+    "/dashboard/activity": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Listar la actividad reciente",
+        "operationId": "listDashboardActivity",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filtra por estado; sin el parámetro devuelve toda la actividad.",
+            "schema": {
+              "enum": [
+                "success",
+                "error",
+                "pending"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El parámetro `status` no es success, error ni pending (`validation_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      }
+    },
+    "/subscriptions": {
+      "get": {
+        "tags": [
+          "Suscripciones"
+        ],
+        "summary": "Listar las suscripciones del usuario",
+        "operationId": "listSubscriptions",
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Suscripciones"
+        ],
+        "summary": "Suscribirse a una API del catálogo",
+        "operationId": "createSubscription",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Recurso creado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta `apiId`, `plan` no es free ni pro o el JSON está mal formado (`validation_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El usuario ya tiene una suscripción a esa API (`already_subscribed`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "La API no está en el catálogo (`unknown_api`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      }
+    },
+    "/subscriptions/{id}": {
+      "get": {
+        "tags": [
+          "Suscripciones"
+        ],
+        "summary": "Obtener una suscripción del usuario",
+        "operationId": "getSubscription",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Suscripciones"
+        ],
+        "summary": "Cambiar el plan de una suscripción",
+        "operationId": "updateSubscription",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`plan` no es free ni pro o el JSON está mal formado (`validation_error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Suscripciones"
+        ],
+        "summary": "Cancelar una suscripción",
+        "operationId": "deleteSubscription",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Id de la suscripción (GUID), tal como lo devuelve `POST /subscriptions`.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Operación realizada; la respuesta no tiene cuerpo."
+          },
+          "404": {
+            "description": "No existe una suscripción del usuario con ese id, o el id no es un GUID (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token de acceso o no es válido (`unauthorized`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [ ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActivityDto": {
+        "required": [
+          "id",
+          "action",
+          "api",
+          "time",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "action": {
+            "type": "string"
+          },
+          "api": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "error",
+              "pending"
+            ],
+            "type": "string"
+          }
+        }
+      },
+      "ApiDto": {
+        "required": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "category",
+          "tags",
+          "version"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ClientDto": {
+        "required": [
+          "name",
+          "slug"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateSubscriptionRequest": {
+        "required": [
+          "apiId",
+          "plan"
+        ],
+        "type": "object",
+        "properties": {
+          "apiId": {
+            "type": "string"
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "HealthResponse": {
+        "required": [
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "StatDto": {
+        "required": [
+          "label",
+          "value",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "SubscriptionDto": {
+        "required": [
+          "id",
+          "apiId",
+          "plan",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "apiId": {
+            "type": "string"
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TokenRequest": {
+        "required": [
+          "username",
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenResponse": {
+        "required": [
+          "accessToken",
+          "tokenType",
+          "expiresIn"
+        ],
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "tokenType": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "UpdateSubscriptionRequest": {
+        "required": [
+          "plan"
+        ],
+        "type": "object",
+        "properties": {
+          "plan": {
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "description": "Token obtenido con POST /auth/token.",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Salud",
+      "description": "Estado de la API."
+    },
+    {
+      "name": "Catálogo",
+      "description": "APIs publicadas en el portal, con búsqueda y filtro por categoría."
+    },
+    {
+      "name": "Clientes",
+      "description": "Empresas que usan las APIs del portal."
+    },
+    {
+      "name": "Autenticación",
+      "description": "Emisión del token JWT con el usuario demo."
+    },
+    {
+      "name": "Dashboard",
+      "description": "Métricas y actividad reciente del portal. Requiere token."
+    },
+    {
+      "name": "Suscripciones",
+      "description": "Suscripciones del usuario del token a las APIs del catálogo. Requiere token."
+    }
+  ]
+}

@@ -40,14 +40,16 @@ public static class OpenApiSecurity
                 [new OpenApiSecuritySchemeReference(SchemeName, context.Document)] = [],
             });
 
+            // Registers ErrorResponse in components (a no-op when another endpoint already did) and points to it with $ref.
             var errorSchema = await context.GetOrCreateSchemaAsync(typeof(ErrorResponse), cancellationToken: cancellationToken);
+            context.Document?.AddComponent(nameof(ErrorResponse), errorSchema);
             operation.Responses ??= [];
             operation.Responses["401"] = new OpenApiResponse
             {
-                Description = "Falta el token de acceso o no es válido.",
+                Description = "Falta el token de acceso o no es válido (`unauthorized`).",
                 Content = new Dictionary<string, OpenApiMediaType>
                 {
-                    ["application/json"] = new() { Schema = errorSchema },
+                    ["application/json"] = new() { Schema = new OpenApiSchemaReference(nameof(ErrorResponse), context.Document) },
                 },
             };
         });
