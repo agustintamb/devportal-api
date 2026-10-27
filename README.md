@@ -120,7 +120,7 @@ variable de entorno pisa al archivo.
 | `ALLOWED_ORIGINS` | Orígenes permitidos por CORS, separados por comas | `http://localhost:3000,http://localhost:3100,https://agustintamb.github.io` |
 | `DB_PATH` | Archivo de la base SQLite; si es relativo, se resuelve contra la carpeta del proyecto (content root) | `db/portal.db` |
 | `JWT_SECRET` | Clave para firmar y validar los JWT (HS256). Obligatoria y de al menos 32 bytes: si falta o es corta, la API no arranca y el error lo explica | Ninguno: en local va en user-secrets (ver "Comandos"); en Render, como variable de entorno |
-| `PROD_URL` | URL del servidor "Producción" en `servers` de la spec | `https://devportal-api.onrender.com` (placeholder hasta conocer la URL final de Render) |
+| `PROD_URL` | URL del servidor "Producción" en `servers` de la spec | `https://devportal-api.onrender.com` (URL del servicio en Render) |
 
 Con `dotnet run`, la base por defecto queda en `src/DevportalApi/db/portal.db`, carpeta ignorada
 por git (`db/` en `.gitignore`).
@@ -247,7 +247,7 @@ scripts que se ejecutan uno tras otro y frenan si uno falla):
    `unauthorized`. Al final muestra los logs del contenedor.
 3. **`deploy`**: solo en push a `main` y si los dos anteriores pasaron. Hace
    `curl -X POST "$RENDER_DEPLOY_HOOK"`, una URL secreta de Render que dispara un deploy. Si el
-   secreto todavía no está cargado, deja un aviso y termina sin error.
+   secreto no está cargado, el job falla para que un deploy perdido no pase desapercibido.
 
 ### Render
 
